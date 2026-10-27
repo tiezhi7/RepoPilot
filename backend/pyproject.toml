@@ -1,0 +1,42 @@
+
+[tool.ruff]
+# 每行代码建议最多 100 个字符
+line-length = 100
+
+# 项目使用 Python 3.12
+target-version = "py312"
+
+[tool.ruff.lint]
+# E4/E7/E9：部分代码错误检查
+# F：潜在错误，例如未使用的导入
+# I：导入语句排序检查
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.pytest.ini_options]
+# 测试文件统一放在 tests 文件夹
+testpaths = ["tests"]
+
+# 让测试可以直接导入 backend/app 中的 app 包
+pythonpath = ["."]
+
+# 显示额外的测试摘要
+addopts = "-ra"
+
+[tool.mypy]
+# 使用 Python 3.12 的语法和类型规则
+python_version = "3.12"
+
+# 首先只对应用代码进行类型检查
+files = ["app"]
+
+# 检查函数内部的类型问题
+check_untyped_defs = true
+
+# 要求函数提供类型注解
+disallow_untyped_defs = true
+
+# 提醒没有实际必要的类型错误忽略
+warn_unused_ignores = true
+
+# 对无法推断的返回值进行提醒
+warn_return_any = true
