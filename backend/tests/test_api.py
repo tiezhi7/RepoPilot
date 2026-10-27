@@ -1,5 +1,7 @@
 """验证 API、四条规则、输入边界及源码不会被执行。"""
 
+from typing import NoReturn
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -33,9 +35,7 @@ def test_normal_python_returns_no_issues(client):
 def test_eval_call_returns_py_eval(client):
     """eval 调用应被识别为 PY_EVAL，而不是在审查时求值。"""
     # 如果错误地执行下面的源码，会出现除零异常；静态审查仍应正常返回。
-    response = client.post(
-        "/api/v1/reviews", json={"code": "value = eval('1 / 0')"}
-    )
+    response = client.post("/api/v1/reviews", json={"code": "value = eval('1 / 0')"})
 
     assert response.status_code == 200
     data = response.json()
@@ -50,9 +50,7 @@ def test_eval_call_returns_py_eval(client):
 
 def test_print_call_returns_py_print(client):
     """保留已有覆盖：第 2 行的 print 调用应产生一条提示。"""
-    response = client.post(
-        "/api/v1/reviews", json={"code": "value = 1\nprint(value)"}
-    )
+    response = client.post("/api/v1/reviews", json={"code": "value = 1\nprint(value)"})
 
     assert response.status_code == 200
     data = response.json()
@@ -67,9 +65,7 @@ def test_print_call_returns_py_print(client):
 
 def test_bare_except_returns_py_bare_except(client):
     """未指定异常类型的 except: 应产生 PY_BARE_EXCEPT，定位到 except 行。"""
-    response = client.post(
-        "/api/v1/reviews", json={"code": "try:\n    pass\nexcept:\n    pass"}
-    )
+    response = client.post("/api/v1/reviews", json={"code": "try:\n    pass\nexcept:\n    pass"})
 
     assert response.status_code == 200
     data = response.json()
@@ -136,7 +132,9 @@ def test_multiple_issues_on_same_line(client):
     assert data["issue_count"] == len(data["issues"]) == 3
     assert [issue["line"] for issue in data["issues"]] == [1, 1, 1]
     assert sorted(issue["rule_id"] for issue in data["issues"]) == [
-        "PY_EVAL", "PY_PRINT", "PY_PRINT"
+        "PY_EVAL",
+        "PY_PRINT",
+        "PY_PRINT",
     ]
 
 
@@ -204,8 +202,7 @@ def test_empty_code_returns_422(client):
     assert response.status_code == 422
     errors = response.json()["detail"]
     assert any(
-        error["loc"] == ["body", "code"] and error["type"] == "string_too_short"
-        for error in errors
+        error["loc"] == ["body", "code"] and error["type"] == "string_too_short" for error in errors
     )
 
 
@@ -262,3 +259,44 @@ def test_submitted_code_is_not_executed(client, tmp_path, capsys):
     assert response.json()["issues"][0]["rule_id"] == "PY_PRINT"
     assert not target.exists()
     assert "submitted-output-must-not-appear" not in capsys.readouterr().out
+
+
+def test_code_over_20000_characters_returns_422(client):
+    """长度为 20001 的源码应被拒绝，并明确报告 code 字段过长。"""
+    # 使用有效的 Python 注释，确保被拒绝的原因是长度，而不是源码语法。
+    code = "#" + "x" * 20_000
+    response = client.post("/api/v1/reviews", json={"code": code})
+
+    assert response.status_code == 422
+    errors = response.json()["detail"]
+    assert any(
+        error["loc"] == ["body", "code"] and error["type"] == "string_too_long" for error in errors
+    )
+
+
+@pytest.mark.parametrize(
+    ("code", "error_type"),
+    [
+        pytest.param("", "string_too_short", id="empty-code"),
+        pytest.param("#" + "x" * 20_000, "string_too_long", id="oversized-code"),
+    ],
+)
+def test_invalid_code_is_rejected_before_review(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    code: str,
+    error_type: str,
+) -> None:
+    """长度校验失败应直接返回 422，不进入审查器，也不回显原始输入。"""
+
+    def fail_if_reviewed(_code: str) -> NoReturn:
+        pytest.fail("无效长度的 code 不应进入审查器")
+
+    monkeypatch.setattr("app.main.review_python", fail_if_reviewed)
+
+    response = client.post("/api/v1/reviews", json={"code": code})
+
+    assert response.status_code == 422
+    errors = response.json()["detail"]
+    assert any(error["loc"] == ["body", "code"] and error["type"] == error_type for error in errors)
+    assert all("input" not in error for error in errors)
