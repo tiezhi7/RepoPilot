@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 _MAX_GITHUB_REPOSITORY_URL_LENGTH = 2048
+_MAX_GITHUB_FILE_PATH_LENGTH = 512
 
 
 class ReviewRequest(BaseModel):
@@ -105,3 +106,54 @@ class GitHubRepositoryResponse(BaseModel):
     default_branch: str
     archived: bool
     html_url: str
+
+
+def validate_github_file_path(file_path: str) -> str:
+    """校验仓库内 Python 文件的相对路径，不访问文件系统，也不规范化输入。"""
+    if not isinstance(file_path, str) or not 1 <= len(file_path) <= _MAX_GITHUB_FILE_PATH_LENGTH:
+        raise ValueError("文件路径必须是长度为 1–512 的字符串。")
+
+    # 先检查原始字符；白名单同时排除空白、控制字符、编码符号及非 ASCII 字符。
+    if re.fullmatch(r"[A-Za-z0-9_./-]+", file_path) is None:
+        raise ValueError("文件路径只能包含 ASCII 字母、数字、点、下划线、连字符和 /。")
+
+    # 不清理空段或点段：拒绝绝对路径、重复斜杠和路径穿越，但允许 package..py。
+    if any(part in {"", ".", ".."} for part in file_path.split("/")):
+        raise ValueError("文件路径必须是相对路径，且不能包含空路径段、. 或 ..。")
+    if not file_path.endswith(".py"):
+        raise ValueError("文件路径必须以小写 .py 结尾。")
+
+    return file_path
+
+
+class GitHubFileReviewRequest(BaseModel):
+    """仅接收仓库主页地址和仓库内 Python 文件路径。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    repository_url: str = Field(
+        strict=True, min_length=1, max_length=_MAX_GITHUB_REPOSITORY_URL_LENGTH
+    )
+    file_path: str = Field(strict=True, min_length=1, max_length=_MAX_GITHUB_FILE_PATH_LENGTH)
+
+    @field_validator("repository_url")
+    @classmethod
+    def validate_repository_url(cls, value: str) -> str:
+        """复用已有 URL 规则，保留合法 URL 的原始形式。"""
+        parse_github_repository_url(value)
+        return value
+
+    @field_validator("file_path")
+    @classmethod
+    def validate_file_path(cls, value: str) -> str:
+        return validate_github_file_path(value)
+
+
+class GitHubFileReviewResponse(BaseModel):
+    """返回文件身份和已有审查结果，不包含完整源码。"""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    repository_url: str
+    file_path: str
+    review: ReviewResponse

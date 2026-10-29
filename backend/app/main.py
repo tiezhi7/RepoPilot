@@ -8,6 +8,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from .github_client import (
+    GitHubFileTooLargeError,
     GitHubForbiddenError,
     GitHubNetworkError,
     GitHubNotFoundError,
@@ -15,10 +16,13 @@ from .github_client import (
     GitHubRedirectError,
     GitHubRepositoryClient,
     GitHubTimeoutError,
+    GitHubUnsupportedFileError,
     GitHubUpstreamError,
 )
 from .reviewer import review_python
 from .schemas import (
+    GitHubFileReviewRequest,
+    GitHubFileReviewResponse,
     GitHubRepositoryRequest,
     GitHubRepositoryResponse,
     ReviewRequest,
@@ -88,3 +92,46 @@ def lookup_github_repository(
         raise HTTPException(status_code=504, detail="GitHub 请求超时。") from None
     except GitHubNetworkError:
         raise HTTPException(status_code=502, detail="GitHub 网络请求失败。") from None
+
+
+@app.post("/api/v1/github/file-review", response_model=GitHubFileReviewResponse)
+def review_github_file(
+    request: GitHubFileReviewRequest,
+    client: Annotated[GitHubRepositoryClient, Depends(get_github_repository_client)],
+) -> GitHubFileReviewResponse:
+    """读取一个受限 Python 文件，再用现有 AST 审查器分析，不执行源码。"""
+    try:
+        code = client.fetch_python_file(request.repository_url, request.file_path)
+    except GitHubNotFoundError:
+        raise HTTPException(status_code=404, detail="仓库或文件不存在或不可公开访问。") from None
+    except GitHubRateLimitError:
+        raise HTTPException(status_code=503, detail="GitHub 请求受到限流，请稍后重试。") from None
+    except GitHubForbiddenError:
+        raise HTTPException(status_code=502, detail="GitHub 拒绝访问该仓库。") from None
+    except GitHubRedirectError:
+        raise HTTPException(
+            status_code=502, detail="GitHub 返回了重定向，请使用仓库当前的主页地址。"
+        ) from None
+    except GitHubUpstreamError:
+        raise HTTPException(
+            status_code=502, detail="GitHub 返回了无效或非预期的文件响应。"
+        ) from None
+    except GitHubTimeoutError:
+        raise HTTPException(status_code=504, detail="GitHub 请求超时。") from None
+    except GitHubNetworkError:
+        raise HTTPException(status_code=502, detail="GitHub 网络请求失败。") from None
+    except GitHubFileTooLargeError:
+        raise HTTPException(
+            status_code=422, detail="Python 文件超过大小限制，最多允许 20000 字节。"
+        ) from None
+    except GitHubUnsupportedFileError:
+        raise HTTPException(status_code=422, detail="GitHub 文件类型或编码不受支持。") from None
+
+    # 下载异常的转换到此结束；不掩盖审查器或响应组装中的程序错误。
+    # 不使用要求非空 code 的 ReviewRequest，空文件也是合法的 Python 源码。
+    issues = review_python(code)
+    return GitHubFileReviewResponse(
+        repository_url=request.repository_url,
+        file_path=request.file_path,
+        review=ReviewResponse(language="python", issue_count=len(issues), issues=issues),
+    )
