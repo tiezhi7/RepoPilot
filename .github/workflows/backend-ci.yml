@@ -10,7 +10,7 @@ permissions:
 jobs:
   backend:
     name: Backend checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     # 仅影响 run 步骤；checkout 和 setup-python 仍按 Action 自身逻辑执行。
     defaults:
@@ -23,22 +23,37 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Python 3.12
+      - name: Set up Python 3.12.16
         uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: "3.12.16"
+          architecture: "x64"
+
+      - name: Create virtual environment
+        run: python -m venv .venv
+
+      - name: Pin pip and show versions
+        run: |
+          set -euo pipefail
+          .venv/bin/python --version
+          .venv/bin/python -m pip install --only-binary=:all: --index-url https://pypi.org/simple pip==26.1.2
+          .venv/bin/python -m pip --version
 
       - name: Install development dependencies
-        run: python -m pip install -r requirements-dev.txt
+        run: |
+          .venv/bin/python -m pip install --require-hashes --only-binary=:all: --index-url https://pypi.org/simple -r locks/linux-py312-dev.txt
+
+      - name: Check dependency compatibility
+        run: .venv/bin/python -m pip check
 
       - name: Ruff code check
-        run: python -m ruff check .
+        run: .venv/bin/python -m ruff check .
 
       - name: Ruff format check
-        run: python -m ruff format --check .
+        run: .venv/bin/python -m ruff format --check .
 
       - name: Mypy type check
-        run: python -m mypy app
+        run: .venv/bin/python -m mypy app
 
       - name: Tests and coverage
-        run: python -m pytest --cov=app --cov-report=term-missing -q
+        run: .venv/bin/python -m pytest --cov=app --cov-report=term-missing -q

@@ -4,7 +4,7 @@ RepoPilot 当前是一个基于 FastAPI 的 Python 后端，支持健康检查�
 
 项目的长期目标是发展为面向 GitHub 的 AI 代码审查助手。当前尚未接入 AI；调用文件审查接口时，只读取默认分支中指定的一个受限 Python 文件，不扫描整个仓库。源码只作为 AST 分析的数据，不执行、导入或保存。
 
-仓库已提供 GitHub Actions 持续集成配置。此前验收记录显示 Day 4 提交已推送且 Backend CI 成功；本批未重新查询。**Day 5 改动尚未提交或推送，没有覆盖这些改动的远程 CI 结果，应用真实访问 GitHub 也仍未验证。** 本次结果仅属于本地离线验收，详见下文记录。
+仓库已提供 GitHub Actions 持续集成配置。此前已核实：Day 5 提交已推送，Backend CI #4 成功，并在 2026-10-30 完成最小应用实网验收，详见下文历史记录。Day 6 已分离依赖声明、生成四份平台锁，并完成 Windows 与 Debian Linux 全新环境验收。**本批 Day 6 第六批只修改 README 和 CI 配置并做静态检查，没有重跑安装或测试、查询 CI 或执行实网请求。Ubuntu CI 已配置为使用 Linux 开发锁，但尚无对应的 Day 6 远程运行结果。** 已有实网成功记录不代表网络始终稳定，也不等于外部 HTTP 访问或部署验收通过。
 
 ## 已实现功能
 
@@ -52,6 +52,14 @@ RepoPilot 当前是一个基于 FastAPI 的 Python 后端，支持健康检查�
 - 区分请求字段验证、文件业务限制、上游数据异常及网络错误；保留已有接口的行为、问题行号和排序。
 - 新增路径与模型测试、文件客户端测试、API 集成测试，离线验证安全边界、不执行源码、错误说明及成功和异常时的资源释放。
 
+### Day 6：依赖分离、平台锁与环境复现
+
+- `requirements.txt` 仅声明 FastAPI、Uvicorn 和 HTTPX；pytest 的原声明移入 `requirements-dev.txt`，版本范围不变。
+- 开发清单继续通过 `-r requirements.txt` 引入运行依赖，保留原有工具声明；开发清单合并后的直接依赖声明集合不变。
+- 第一批当时只调整声明归属；第二至第五批随后生成 Windows / CPython 3.14 和 Linux / CPython 3.12 的运行锁、开发锁，并分别完成全新环境实际安装、版本核对、`pip check`、运行冒烟及开发检查。
+- 锁文件固定完整依赖版本及 SHA-256 哈希；两平台的条件依赖分别由实际目标环境解析，开发锁包含同平台运行锁的全部包且共有版本一致。
+- 第六批将后端 CI 配置为 Ubuntu 24.04 / Python 3.12.16，在独立虚拟环境中严格安装 Linux 开发锁，再执行依赖兼容性和原四项质量检查。此处说明配置已完成，远程运行仍待后续验收。
+
 以上是代码和配置中已有的能力；后面的“下一阶段计划”尚未实施。
 
 ## 项目结构
@@ -68,6 +76,11 @@ RepoPilot/
     ├── requirements.txt
     ├── requirements-dev.txt
     ├── pyproject.toml
+    ├── locks/
+    │   ├── windows-py314-runtime.txt
+    │   ├── windows-py314-dev.txt
+    │   ├── linux-py312-runtime.txt
+    │   └── linux-py312-dev.txt
     ├── app/
     │   ├── __init__.py
     │   ├── main.py
@@ -90,8 +103,10 @@ RepoPilot/
 - `.gitignore`：告诉 Git 哪些文件不需要纳入版本管理。
 - `README.md`：介绍项目、目录结构及使用方式。
 - `.github/workflows/backend-ci.yml`：定义 GitHub Actions 后端检查任务。
-- `backend/requirements.txt`：基础依赖清单，目前包含服务运行包及测试包。
-- `backend/requirements-dev.txt`：引入基础依赖清单，再安装 Ruff、mypy、pytest-cov 和测试客户端 httpx2。
+- `backend/requirements.txt`：维护 FastAPI、Uvicorn 和 HTTPX 三项运行直接依赖的版本范围，是生成运行锁的输入。
+- `backend/requirements-dev.txt`：通过 `-r requirements.txt` 引入运行声明，再维护 pytest、Ruff、mypy、pytest-cov 和测试客户端 httpx2 的版本范围，是生成开发锁的输入。
+- `backend/locks/windows-py314-runtime.txt`、`windows-py314-dev.txt`：Windows AMD64 / CPython 3.14.6 的完整运行、开发依赖及哈希。
+- `backend/locks/linux-py312-runtime.txt`、`linux-py312-dev.txt`：Debian 12 / x86_64 / CPython 3.12.16 的完整运行、开发依赖及哈希；其中开发锁也是本次准备接入 Ubuntu CI 的安装入口。
 - `backend/pyproject.toml`：保存 Ruff、pytest 和 mypy 配置；覆盖率通过 pytest 命令行参数启用。
 - `backend/app/__init__.py`：将 `app` 目录标识为 Python 包，便于导入其中的模块。
 - `backend/app/main.py`：FastAPI 应用入口，负责接收请求和组织响应。
@@ -110,47 +125,83 @@ RepoPilot/
 
 ## 环境准备
 
-以下命令适用于 Windows PowerShell。CI 使用 Python 3.12，Ruff 和 mypy 的目标版本也都是 3.12；本地验证环境及其结果见下文。静态检查的目标版本不限制服务实际使用的解释器，也不代表已经完成多版本兼容性验证。
+依赖分为两层：`requirements.txt` / `requirements-dev.txt` 维护直接依赖的版本范围；`locks/` 中四份锁固定各目标环境的完整直接、间接依赖及哈希。**复现已验证环境时安装对应锁文件**，范围声明用于维护和重新解析，不作为当前 CI 的项目依赖安装入口。
 
-从项目根目录 `RepoPilot` 开始，先进入 `backend`。后续安装、启动、测试和质量检查命令都在 `backend` 目录执行；如果已经位于该目录，无需再次执行 `Set-Location backend`。
+| 文件（相对于 `backend`） | 职责与目标 |
+| --- | --- |
+| `requirements.txt` | 三项运行直接依赖的版本范围：`fastapi`、`uvicorn[standard]`、`httpx` |
+| `requirements-dev.txt` | 引入运行声明，再添加 `pytest`、`ruff`、`mypy`、`pytest-cov`、`httpx2` 五项开发直接依赖 |
+| `locks/windows-py314-runtime.txt` | Windows AMD64 / CPython 3.14.6，仅运行服务，22 个锁定包 |
+| `locks/windows-py314-dev.txt` | 同一 Windows 目标，包含运行依赖和开发工具，39 个锁定包 |
+| `locks/linux-py312-runtime.txt` | Debian 12 / x86_64 / glibc 2.36 / CPython 3.12.16，仅运行服务，23 个锁定包 |
+| `locks/linux-py312-dev.txt` | 同一 Debian 目标，包含运行依赖和开发工具，39 个锁定包；Ubuntu 24.04 / Python 3.12.16 CI 目标待远程验证 |
+
+Linux 锁在实际 Debian 容器中生成并验证。基础镜像完整摘要为：
+
+```text
+python@sha256:e697c81897302a4c4333bade000d98038fbb21eb064f8ee1fd42d02ebcd9d337
+```
+
+Ruff 和 mypy 的目标版本仍是 Python 3.12。静态检查配置不会自动切换解释器，也不代表任意 Python 版本或 Linux 发行版均已验证。安装前先确认解释器版本、架构与所选锁匹配；本次 Ubuntu CI 的目标固定为 24.04 / x64 / Python 3.12.16，其运行结果不能由 Debian 验收推导。
+
+### Windows PowerShell：CPython 3.14.6 / AMD64
+
+从项目根目录进入 `backend`；已在该目录则不必再次进入。以下示例要求当前 `python` 已指向 **CPython 3.14.6 / AMD64**，先检查输出，版本或架构不符时不要继续按本示例安装。
 
 ```powershell
 Set-Location backend
 python --version
+python -c "import platform; print(platform.machine())"
 python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --only-binary=:all: --index-url https://pypi.org/simple pip==26.1.2
 ```
 
-若已有可用的 `backend/.venv`，跳过创建命令，不要覆盖现有环境。`python -m venv` 使用当前 `python` 对应的解释器；想与 CI 一致时，应确认所选解释器为 Python 3.12。静态检查配置不会自动切换解释器版本。
-
-`.venv` 是本项目的独立 Python 环境，用于隔离依赖。可在当前 PowerShell 窗口中激活：
+`.venv` 是独立虚拟环境。已有 `.venv` 时不要覆盖；要重新验证依赖分离，应另选干净目录创建环境。下面按用途**只选择一条安装命令**，运行环境与开发环境的隔离验收使用两个全新环境：
 
 ```powershell
-.\.venv\Scripts\Activate.ps1
-python --version
+# 开发：包含运行依赖、测试和质量工具
+.\.venv\Scripts\python.exe -m pip install --require-hashes --only-binary=:all: --index-url https://pypi.org/simple -r locks/windows-py314-dev.txt
 ```
-
-激活后，`python` 指向该虚拟环境；执行 `deactivate` 可退出。若激活脚本不能运行，也可直接使用下面的虚拟环境解释器，无需修改系统执行策略。后续命令统一采用这种显式路径：
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+# 仅运行服务：在独立的全新环境中选择运行锁
+.\.venv\Scripts\python.exe -m pip install --require-hashes --only-binary=:all: --index-url https://pypi.org/simple -r locks/windows-py314-runtime.txt
 ```
 
-这里的路径是 `.\.venv`，不是 `..venv`。安装开发清单会同时安装基础依赖和检查工具；本次 Day 5 文档验收使用已有环境，未执行安装或升级。
+这里是 `.\.venv`，不是 `..venv`。命令显式指定解释器，不需要激活；如需交互使用，可执行 `.\.venv\Scripts\Activate.ps1`，完成后用 `deactivate` 退出，无需为这些显式命令修改系统执行策略。
 
-当前依赖清单的实际关系如下：
+### Debian Linux：CPython 3.12.16 / x86_64
 
-| 文件 | 当前内容 |
-| --- | --- |
-| `requirements.txt` | `fastapi`、`uvicorn[standard]`、`httpx`、`pytest` |
-| `requirements-dev.txt` | 通过 `-r requirements.txt` 引入基础清单，再添加 `ruff`、`mypy`、`pytest-cov`、`httpx2` |
+以下命令在上述 Debian 目标的 `backend` 目录执行，先确认 `python3.12` 实际为 **3.12.16 / x86_64**。与 Windows 一样，不覆盖已有 `.venv`，不同用途使用各自干净环境。
 
-仅启动服务时也可以安装基础清单：
-
-```powershell
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```bash
+python3.12 --version
+python3.12 -c 'import platform; print(platform.machine())'
+python3.12 -m venv .venv
+.venv/bin/python -m pip install --only-binary=:all: --index-url https://pypi.org/simple pip==26.1.2
 ```
 
-当前 `httpx` 和 `pytest` 仍在基础清单中，尚未完全分离运行依赖与测试依赖。新增的 Ruff、mypy、pytest-cov 和 httpx2 仅在开发清单中，不是当前 API 服务运行所需的依赖。
+按用途只选择以下一条安装命令：
+
+```bash
+# 开发环境
+.venv/bin/python -m pip install --require-hashes --only-binary=:all: --index-url https://pypi.org/simple -r locks/linux-py312-dev.txt
+```
+
+```bash
+# 独立的纯运行环境
+.venv/bin/python -m pip install --require-hashes --only-binary=:all: --index-url https://pypi.org/simple -r locks/linux-py312-runtime.txt
+```
+
+`--require-hashes` 校验安装文件的哈希，`--only-binary=:all:` 要求使用 wheel（可直接安装的发行文件），不回退到源码构建。**向已有开发环境安装运行锁不会自动卸载开发包**，因此不能据此证明纯运行环境可用。安装后用对应虚拟环境的 `python -m pip check` 检查依赖兼容性。
+
+HTTPX 用于生产 GitHub 客户端，保留在运行声明；pytest、Ruff、mypy、pytest-cov、httpx2 属于开发声明。安装开发锁会包含运行依赖，但不把开发工具变成服务的运行依赖。两平台实际安装记录见下文；本批第六批未安装、升级或卸载任何包，也未创建虚拟环境。
+
+### 锁文件维护
+
+修改直接依赖时，先改对应范围声明，再在各自目标环境重新解析；先生成运行锁，再生成受运行锁约束的开发锁，并核对共有版本一致。保留 `uvicorn[standard]` 选中的平台依赖，使用哈希和仅 wheel 安装检查，再在全新环境实际安装、验证。不要把 Windows 锁直接用作 Linux 安装输入。
+
+工具版本、生成约束、`pip-compile --generate-hashes --strip-extras` 和安装预演方式详见各锁文件头。文件头描述生成批次的条件，后续实际安装验收另列于下文。生成和预演不等于运行验收；维护时不在 CI 中重新生成锁，也不只修改版本而保留旧哈希。
 
 各包的用途：
 
@@ -165,10 +216,16 @@ python --version
 
 ## 运行后端
 
-在 `backend` 目录执行：
+在 `backend` 目录执行。Windows PowerShell：
 
 ```powershell
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
+```
+
+Linux：
+
+```bash
+.venv/bin/python -m uvicorn app.main:app --reload
 ```
 
 `app.main:app` 表示加载 `app/main.py` 中名为 `app` 的对象；`--reload` 用于开发时自动重新加载代码。按 `Ctrl+C` 停止服务。
@@ -178,7 +235,7 @@ python --version
 - 健康检查：`http://127.0.0.1:8000/health`
 - 可交互的接口文档：`http://127.0.0.1:8000/docs`
 
-打开 `/docs` 不会自动请求 GitHub；在页面执行两个 GitHub 接口会触发真实上游请求。本次文档验收没有启动服务或执行实网请求。
+打开 `/docs` 不会自动请求 GitHub；在页面执行两个 GitHub 接口会触发真实上游请求。本批 Day 6 没有启动服务或执行实网请求；此前最小实网验收使用进程内接口流程，没有启动监听服务。
 
 ## 接口与审查规则
 
@@ -387,7 +444,7 @@ URL 和文件路径校验函数本身不进行 DNS 或 HTTP 请求；仓库或�
 - **不提供完整安全分析或安全保证。** 当前规则不是完整的漏洞扫描，也没有沙箱执行或进程隔离。已有源码长度、远程文件字节和文件响应体大小限制，但不能替代完整的 CPU、内存、并发及总耗时资源隔离。
 - **GitHub 范围受限。** 只支持公开仓库元数据查询和默认分支单个 Python 文件读取审查；不读取 PR 或 diff，不支持私有仓库、Token、webhook 或自动发布评论；GitHub Actions 仅负责验证本项目。
 - **GitHub 客户端没有重试、缓存或认证。** 当前也没有调用方鉴权或应用级请求限流；文件读取有受限响应体和源码配额，元数据查询尚无相同的流式正文限制，不属于完整的生产环境防护。
-- **网络配置固定。** `trust_env=False`，不会自动采用环境代理或自定义证书变量；需要代理或企业证书的环境可能无法直接连接。应用真实访问 GitHub、DNS 和 TLS 握手仍未验证；此前 Day 4 CI 成功记录不覆盖尚未提交的 Day 5 改动。
+- **网络配置固定。** `trust_env=False`，不会自动采用环境代理或自定义证书变量；需要代理或企业证书的环境可能无法直接连接。2026-10-30 已完成最小应用实网验收，但期间也遇到匿名限流和连接超时，不保证所有网络环境或后续请求始终可用；外部 HTTP 访问和部署验收仍未覆盖。
 - **没有 AI 审查。** 不调用 LLM（大语言模型）或付费 AI API，不生成 AI 修复建议。
 - **没有产品前端、数据库或审查记录持久化。** `/docs` 是 FastAPI 提供的接口调试文档。
 
@@ -407,15 +464,17 @@ $reviewResult | ConvertTo-Json -Depth 5
 
 第一个请求应返回 `status: ok`；第二个应返回 `language: python`、`issue_count: 1` 和一条 `PY_PRINT` 提示。也可在 `/docs` 页面直接试用接口。
 
-上面的健康检查和源码提交接口不需要 GitHub 网络。访问 `/docs` 也不会自动查询 GitHub；在文档页面执行仓库元数据查询或文件审查接口会发出真实 GitHub 请求，属于另行进行的实网验证，本批未执行。
+上面的健康检查和源码提交接口不需要 GitHub 网络。访问 `/docs` 也不会自动查询 GitHub；在文档页面执行仓库元数据查询或文件审查接口会发出真实 GitHub 请求。本批 Day 6 未执行这些命令；此前最小实网验收的范围和结果见下文历史记录。
 
 ## 运行自动化测试
 
-在 `backend` 目录执行，无需另行启动服务：
+按上文安装对应平台的开发锁后，在 `backend` 目录执行，无需另行启动服务。Windows PowerShell：
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
 ```
+
+Linux 的同一命令为 `.venv/bin/python -m pytest -q`。
 
 `pyproject.toml` 已将测试发现目录设置为 `tests`，并将 `backend` 加入测试导入路径，所以命令无需额外修改 `PYTHONPATH`。`TestClient` 在进程内调用接口，不需要真实 GitHub 或 AI 服务。
 
@@ -431,18 +490,27 @@ Day 5 的三个文件测试模块进一步覆盖相对 Python 路径、严格模
 
 ## 在本地运行全部质量检查
 
-先安装 `requirements-dev.txt`，然后在 `backend` 目录执行：
+先按“环境准备”安装对应平台的开发锁，然后在 `backend` 目录执行。Windows PowerShell：
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest --cov=app --cov-report=term-missing -q
+.\.venv\Scripts\python.exe -m pip check
 .\.venv\Scripts\python.exe -m ruff check .
 .\.venv\Scripts\python.exe -m ruff format --check .
 .\.venv\Scripts\python.exe -m mypy app
+.\.venv\Scripts\python.exe -m pytest --cov=app --cov-report=term-missing -q
 ```
 
-以上四条与 CI 使用相同的检查内容；CI 的执行顺序为 Ruff、格式、mypy、pytest。本地命令显式指定虚拟环境解释器，CI 则由 setup-python 选择 Python。每条命令都应成功，不能只根据最后一条的结果判断所有检查通过。
+Linux：
 
-可选运行 `.\.venv\Scripts\python.exe -m pip check` 检查已安装依赖冲突；它不是当前 CI 的检查步骤。
+```bash
+.venv/bin/python -m pip check
+.venv/bin/python -m ruff check .
+.venv/bin/python -m ruff format --check .
+.venv/bin/python -m mypy app
+.venv/bin/python -m pytest --cov=app --cov-report=term-missing -q
+```
+
+这与本次 CI 配置的检查内容和顺序一致：先独立执行 `pip check` 检查依赖冲突，再执行原四项检查。CI 使用 setup-python 选出的解释器创建 `.venv`，之后安装和检查均显式使用 `.venv/bin/python`，不依赖跨步骤激活。每条命令都应成功，不能只根据最后一条的结果判断所有检查通过。
 
 如需确认没有弃用警告等问题，可将警告视为错误运行同一套测试：
 
@@ -464,7 +532,7 @@ Day 5 的三个文件测试模块进一步覆盖相对 Python 路径、严格模
 
 ### Day 4 本地验收记录（历史）
 
-以下保留此前 Day 4 的本地验收记录：2026-10-29，Windows 虚拟环境，实际解释器 Python 3.14.6。它不是本次 Day 5 的检查结果，统计的代码也早于 Day 5。
+以下保留此前 Day 4 的本地验收记录：2026-10-29，Windows 虚拟环境，实际解释器 Python 3.14.6。它不代表后续批次重新执行检查，统计的代码也早于 Day 5。
 
 | 检查 | Day 4 历史结果 | 退出码 |
 | --- | --- | --- |
@@ -477,13 +545,13 @@ Day 5 的三个文件测试模块进一步覆盖相对 Python 路径、严格模
 
 该次本地通过本身不能证明 Python 3.12、Linux 或 GitHub 云端通过；后续 Day 4 远程 CI 记录见下文。100% 行覆盖率不代表验证了所有输入组合或分支；当前没有性能基准。
 
-### Day 5 本地全量验收记录
+### Day 5 本地全量验收记录（历史，提交前）
 
-执行日期：2026-10-29（本机时区 UTC+08:00）。使用已有的 `backend/.venv`，实际解释器为 **Python 3.14.6**，覆盖率报告平台为 `win32`。CI 和静态检查的目标仍为 Python 3.12，本批没有切换解释器。
+执行日期：2026-10-29（本机时区 UTC+08:00）。当时使用已有的 `backend/.venv`，实际解释器为 **Python 3.14.6**，覆盖率报告平台为 `win32`。CI 和静态检查的目标为 Python 3.12，该次本地验收没有切换解释器。这是此前记录，本批 Day 6 未重新执行。
 
-以下命令在 `backend` 目录依次执行，每项均记录了实际退出码：
+以下命令在当时的 `backend` 目录依次执行，每项均记录了实际退出码：
 
-| 命令 | 本次实际输出摘要 | 退出码 |
+| 命令 | Day 5 本地历史输出摘要 | 退出码 |
 | --- | --- | --- |
 | `.\.venv\Scripts\python.exe -m pytest --cov=app --cov-report=term-missing -q` | `691 passed in 7.18s`；333 条可执行语句，未覆盖 0 条，`app` 行覆盖率 100% | `0` |
 | `.\.venv\Scripts\python.exe -m ruff check .` | `All checks passed!` | `0` |
@@ -502,21 +570,75 @@ Day 5 的三个文件测试模块进一步覆盖相对 Python 路径、严格模
 | `app/schemas.py` | 76 | 0 | 100% |
 | 合计 | 333 | 0 | 100% |
 
-四项检查首次运行即通过，最终状态为 **Day 5 本地全量验收通过**，没有本批失败或修复重跑记录。pytest 无失败，输出未列出警告。本次只运行了一次全量 pytest，未另外运行不带覆盖率的全量测试。
+该次四项检查首次运行即通过，状态为 **Day 5 本地全量验收通过**，没有当次失败或修复重跑记录。pytest 无失败，输出未列出警告。当时只运行了一次全量 pytest，未另外运行不带覆盖率的全量测试。
 
-统计口径为 `--cov=app` 的行覆盖率，没有添加 `--cov-branch`、覆盖率门槛、警告过滤、测试排除或其他改变统计口径的参数。当前配置没有最低覆盖率门槛；100% 仅说明这次测试执行了所有计入统计的应用代码行，不能证明所有分支、输入组合或安全边界都已验证。
+该记录的统计口径为 `--cov=app` 的行覆盖率，没有添加 `--cov-branch`、覆盖率门槛、警告过滤、测试排除或其他改变统计口径的参数。当前配置没有最低覆盖率门槛；100% 仅说明当时测试执行了所有计入统计的应用代码行，不能证明所有分支、输入组合或安全边界都已验证。
 
-本批只更新 README，使用现有依赖完成检查，没有安装或升级依赖、重建环境、自动格式化或修复、启动服务、执行实网请求、暂存、提交或推送。检查完成后只改文档，不重复全量检查。
+Day 5 第四批文档与本地验收时，只更新 README，使用已有依赖完成检查。当时没有安装或升级依赖、重建环境、自动格式化或修复、启动服务、执行实网请求、暂存、提交或推送；检查完成后只改文档，没有重复全量检查。后续提交、推送、远程 CI 和最小实网验收已完成，记录如下。
 
-验收状态分开记录：
+### Day 5 提交与远程 CI 验收记录（历史）
 
-- **本地离线验收：** 上表为本次实际结果，GitHub 响应由测试模拟，没有调用真实 GitHub、DNS 或 TLS 握手验证。
-- **应用真实访问 GitHub：** 仍未验证，离线通过不能证明网络、代理、证书或匿名额度可用。
-- **远程 GitHub Actions：** Day 4 成功状态来自此前记录，本批未重新查询；Day 5 改动尚未提交或推送，没有覆盖这些未提交改动的远程 CI 结果。
+以下为此前已核实的验收记录，本批 Day 6 第六批只修改文档与 CI 配置，没有重新查询远程仓库或 CI：
+
+- 提交：`0adebe6b11a244d33ea41466d305ec7377cd2598`。
+- 提交信息：`feat: review Python files from public GitHub repositories`。
+- 已推送分支：`day4/github-api`。
+- [Backend CI #4](https://github.com/tiezhi7/RepoPilot/actions/runs/40920455169) 对应上述完整 SHA，最终结论为 `success`。
+
+| 项目 | Day 5 远程 CI 历史结果 |
+| --- | --- |
+| 环境 | Ubuntu 24.04.5，Python 3.12.15 |
+| pytest | `691 passed in 2.91s` |
+| `app` 行覆盖率 | 100%；347 条语句，0 条未覆盖 |
+| Ruff | 通过 |
+| 格式检查 | 14 个文件符合格式 |
+| mypy | 6 个源文件检查通过 |
+
+本地记录为 Python 3.14.6、333 条语句，CI 记录为 Python 3.12.15、347 条语句；两者分别保留，没有调查或推测统计差异的原因。这些历史结果不代表 Day 6 的锁定依赖与 CI 变更已经通过远程验证。
+
+### Day 5 最小应用实网验收记录（历史）
+
+日期：**2026-10-30，北京时间**。以下也是此前已核实记录，本批 Day 6 没有重新执行。验收通过进程内 FastAPI 接口流程，使用生产 GitHub 客户端和真实 GitHub HTTPS 请求：
+
+| 场景 | 历史结果 |
+| --- | --- |
+| 健康接口 | HTTP 200 |
+| 非法文件路径 | HTTP 422 |
+| 读取 `psf/requests` 的 `src/requests/api.py` 并审查 | HTTP 200，`issue_count` 为 0 |
+| 随机生成的不存在文件路径 | HTTP 404，固定错误说明正确 |
+
+期间曾遇到匿名限流和连接超时，后续完成了上述成功场景；不能据此宣称网络始终稳定。验收没有启动监听服务，因此没有覆盖外部 HTTP 访问或部署验收，也不代表所有网络、代理、证书环境均已验证。
+
+本地离线测试、远程 CI 和最小应用实网验收是三份独立记录。本地和 CI 中的自动化测试使用模拟上游响应；最小实网记录才覆盖上述真实 GitHub 上游访问场景。本批 Day 6 第六批没有重新执行这三项验收。
+
+### Day 6 平台锁与全新环境验收记录（此前批次）
+
+以下记录来自 2026-10-30 已完成的 Windows 第三批和 Debian Linux 第五批验收，**不是本批第六批重跑的结果**。运行环境、开发环境各自新建，未继承旧项目环境的包；安装均要求哈希和可用 wheel，并保持 TLS 校验。
+
+| 项目 | Windows 本地历史结果 | Debian Linux 本地历史结果 |
+| --- | --- | --- |
+| 目标环境 | Windows AMD64 / CPython 3.14.6 | Debian 12 / x86_64 / glibc 2.36 / CPython 3.12.16 |
+| 运行锁 / 开发锁 | 22 包 / 39 包 | 23 包 / 39 包 |
+| 实际安装与逐包版本核对 | 两个新环境均通过 | 两个新环境均通过 |
+| `pip check` | 两环境均退出 0 | 两环境均退出 0 |
+| 运行环境冒烟 | 导入、Uvicorn 入口、健康接口、正常源码审查、四路由 OpenAPI 通过 | 相同检查通过，另验证 uvloop 事件循环创建与关闭 |
+| 开发环境 Ruff / 格式 / mypy | 均退出 0；14 个文件符合格式、6 个源文件类型检查通过 | 均退出 0；14 个文件符合格式、6 个源文件类型检查通过 |
+| 开发环境 pytest | `691 passed in 6.26s`，未报告警告 | `691 passed in 10.47s`，未报告跳过项或警告 |
+| `app` 行覆盖率 | 333 条语句、0 未覆盖、100% | 347 条语句、0 未覆盖、100% |
+
+两平台的引导包 pip 均固定为 26.1.2，单独记录，不计入锁定包数量；验收环境没有安装 pip-tools。运行锁全部包含于同平台开发锁且共有版本一致，纯运行环境没有开发独有包。`uvicorn[standard]` 的条件依赖已按包元数据核实完整；Linux 需要 `uvloop`，Windows 开发依赖中的 `colorama` 不进入 Linux 开发锁。
+
+两平台的运行环境冒烟各保留一条 `StarletteDeprecationWarning`：`Using httpx with starlette.testclient is deprecated; install httpx2 instead.` 均未过滤，也未因此向运行环境增加 httpx2；两次开发环境 pytest 均未报告警告。事件循环和 TestClient 已关闭。
+
+Debian 使用上文完整镜像摘要；实际 Python 为 `3.12.16 (main, Oct 28 2026, 02:01:35) [GCC 12.2.0]`。安装后的检查阶段已断开本批容器网络，缓存、日志、覆盖率和临时测试文件均放在专用临时目录，项目只读挂载；两个验收容器已清理。
+
+上述覆盖率均为行覆盖率，未收集分支覆盖率；不推测两平台语句数差异的原因。运行冒烟通过进程内 TestClient 执行，没有启动监听端口，也没有调用 GitHub 业务接口。它们证明所述新环境中的安装与最小应用行为，不能替代 Ubuntu CI、外部 HTTP 访问或部署验收。
+
+本批第六批只调整 README 和 CI 配置，并做 YAML 与关键结构静态检查，未重跑以上安装、冒烟、pytest、Ruff 或 mypy。**Ubuntu 24.04 / Python 3.12.16 是本次准备的 CI 目标，Day 6 远程 CI 尚未执行或验证。**
 
 ## Ruff 代码质量检查与格式检查
 
-先安装 `requirements-dev.txt`。在 `backend` 目录运行代码质量检查：
+先安装对应平台的开发锁。在 `backend` 目录运行代码质量检查，以下为 Windows 命令，Linux 将解释器路径换为 `.venv/bin/python`：
 
 ```powershell
 .\.venv\Scripts\python.exe -m ruff check .
@@ -539,28 +661,46 @@ Day 5 的三个文件测试模块进一步覆盖相对 Python 路径、严格模
 - `push`：提交被推送到仓库时触发。
 - `pull_request`：由工作流监听的 Pull Request 事件触发。
 
-当前未设置分支或路径过滤。工作流在 `ubuntu-latest` 上使用 `actions/checkout@v7` 获取代码、`actions/setup-python@v7` 安装 Python 3.12，然后在 `backend` 目录执行：
+当前未设置分支或路径过滤，保留 `backend` job（显示名称 **Backend checks**）和只读权限。工作流固定 `runs-on: ubuntu-24.04`，使用原有 `actions/checkout@v7` 和 `actions/setup-python@v7`；checkout 配置 `persist-credentials: false`，setup-python 指定 `python-version: "3.12.16"`、`architecture: "x64"`。
+
+所有 `run` 步骤的工作目录仍为 `backend`。先使用 setup-python 提供的 `python` 创建新虚拟环境；随后均显式使用 `.venv/bin/python`：
 
 ```bash
-python -m pip install -r requirements-dev.txt
-python -m ruff check .
-python -m ruff format --check .
-python -m mypy app
-python -m pytest --cov=app --cov-report=term-missing -q
+python -m venv .venv
+
+# 以下版本与安装命令位于新虚拟环境中
+set -euo pipefail
+.venv/bin/python --version
+.venv/bin/python -m pip install --only-binary=:all: --index-url https://pypi.org/simple pip==26.1.2
+.venv/bin/python -m pip --version
+.venv/bin/python -m pip install --require-hashes --only-binary=:all: --index-url https://pypi.org/simple -r locks/linux-py312-dev.txt
+.venv/bin/python -m pip check
+.venv/bin/python -m ruff check .
+.venv/bin/python -m ruff format --check .
+.venv/bin/python -m mypy app
+.venv/bin/python -m pytest --cov=app --cov-report=term-missing -q
 ```
 
-任务仅申请 `permissions: contents: read`，无需手动配置密钥，不部署项目或发布软件包。任意检查步骤失败都会使任务失败；覆盖率报告目前只用于观察，尚未设置覆盖率下降时单独失败的门槛。
+上面按执行顺序展示命令；工作流将创建环境、固定 pip 和输出版本、安装开发锁、`pip check`、四项质量检查分为独立步骤。`pip check` 检查已安装包之间的依赖关系，不替代应用测试。项目依赖不再从范围声明安装，CI 不安装 pip-tools，也不重新生成锁文件。
 
-**此前 Day 4 远程验收记录：** 提交 `d584a95d48281ec19fa3429f90378366f2081c88` 已推送，Backend CI 成功，见[历史运行记录](https://github.com/tiezhi7/RepoPilot/actions/runs/40859087524)。这是此前上下文提供的验收状态，**本批未访问或重新查询该运行**，不能写成 Day 5 远程 CI 已通过；CI 成功也不代表应用实际访问 GitHub 成功。
+任务仅申请 `permissions: contents: read`，无需手动配置密钥。没有增加矩阵、容器 job、缓存、部署或发布；任意安装、哈希校验或检查失败都会使 job 失败，未设置忽略失败。覆盖率仍只测量行覆盖率，没有最低覆盖率门槛。
 
-Day 5 未提交的本地文件不会出现在上述历史运行中。后续提交并推送完整 Day 5 变更后，可在仓库页面选择 **Actions → Backend CI → 对应运行记录 → Backend checks**，核对运行的提交 SHA 并展开各步骤查看日志。新增源码和测试需要进入 Git 提交，云端才能取得这些内容。参见 [GitHub 查看工作流运行历史](https://docs.github.com/en/actions/how-tos/monitor-workflows/view-workflow-run-history)。
+**此前 Day 4 远程验收记录：** 提交 `d584a95d48281ec19fa3429f90378366f2081c88` 已推送，Backend CI 成功，见[历史运行记录](https://github.com/tiezhi7/RepoPilot/actions/runs/40859087524)。该链接只代表 Day 4；Day 5 的成功运行是上文另列的 Backend CI #4。**本批 Day 6 未访问或重新查询这些运行。** CI 成功本身不能替代应用实网验收，后者按上文记录的场景单独完成。
+
+Day 5 提交已经由上述运行验证；Day 6 的依赖声明、四份锁、CI 和文档调整尚未提交，不在这些历史运行的验证范围内。**CI 配置已改用固定依赖，但 Day 6 的 Ubuntu 远程 CI 尚未执行或验证。** 本地 YAML 语法和结构检查不能替代 GitHub 实际执行，也不能用 Debian 通过推断 Ubuntu 通过。
+
+后续经授权提交并推送新变更后，可在仓库页面选择 **Actions → Backend CI → 对应运行记录 → Backend checks**，核对完整提交 SHA，再展开环境版本、严格安装、`pip check` 和四项检查的实际日志。参见 [GitHub 查看工作流运行历史](https://docs.github.com/en/actions/how-tos/monitor-workflows/view-workflow-run-history)。
 
 ## 下一阶段计划（尚未实施）
 
-Day 5 已实现单文件远程源码读取与静态审查，后续先完成外部验收，再评估扩展：
+Day 5 的提交推送、远程 CI 和最小应用实网验收已有历史记录；Day 6 已完成依赖分离、四份锁及 Windows / Debian 全新环境验收，本批另完成 CI 配置与文档同步。后续工作按独立范围进行：
 
-1. 经单独授权后，审查并提交、推送完整 Day 5 变更，在 GitHub 核对对应提交 SHA 的 Python 3.12 CI 日志。
-2. 经单独授权后，进行一次公开仓库的匿名实网核验，记录成功、网络配置或额度限制的真实情况，不将其加入离线自动化测试。
-3. 评估依赖版本锁定、运行依赖与测试依赖分离、应用级限流及缓存，再依据需求和测试报告讨论覆盖率门槛。
+1. 完整审阅累计八项变更及四份未跟踪锁文件的实际内容，确认范围和兼容性。
+2. 经授权创建本地提交、推送指定分支；本批不执行这些 Git 操作。
+3. 核对对应 Day 6 完整提交 SHA 的 Ubuntu 24.04 / Python 3.12.16 CI 日志，记录真实安装、哈希、`pip check` 及四项检查结果，不预填测试数量或覆盖率。
+4. 单独安排监听服务及外部 HTTP 访问验收；进程内 TestClient 成功不代表监听服务已验证。
+5. 单独安排部署验收，并在需要时另行授权复验新依赖环境中的 GitHub 实网访问；Day 5 的最小实网成功记录继续保留，不能由本次离线结果推导新环境的网络表现。
+
+应用级限流、缓存和覆盖率门槛也需要后续单独评估；本批未添加。
 
 GitHub PR/Diff 集成、整仓库扫描、AI 审查、私有仓库与 Token、评论发布、前端和数据库仍属于后续需要单独设计与确认的工作，不在本批实施。
