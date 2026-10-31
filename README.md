@@ -4,7 +4,7 @@ RepoPilot 当前是一个基于 FastAPI 的 Python 后端，支持健康检查�
 
 项目的长期目标是发展为面向 GitHub 的 AI 代码审查助手。当前尚未接入 AI；调用文件审查接口时，只读取默认分支中指定的一个受限 Python 文件，不扫描整个仓库。源码只作为 AST 分析的数据，不执行、导入或保存。
 
-仓库已提供 GitHub Actions 持续集成配置。此前已核实：Day 5 提交已推送，Backend CI #4 成功，并在 2026-10-30 完成最小应用实网验收，详见下文历史记录。Day 6 已分离依赖声明、生成四份平台锁，并完成 Windows 与 Debian Linux 全新环境验收。**本批 Day 6 第六批只修改 README 和 CI 配置并做静态检查，没有重跑安装或测试、查询 CI 或执行实网请求。Ubuntu CI 已配置为使用 Linux 开发锁，但尚无对应的 Day 6 远程运行结果。** 已有实网成功记录不代表网络始终稳定，也不等于外部 HTTP 访问或部署验收通过。
+仓库已提供 GitHub Actions 持续集成配置。此前已核实：Day 5 提交已推送，Backend CI #4 成功，并在 2026-10-30 完成最小应用实网验收，详见下文历史记录。Day 6 已分离依赖声明、生成四份平台锁、完成 Windows 与 Debian Linux 全新环境验收，相关变更已提交并推送，Ubuntu 开发环境的 Backend CI #5 也已成功。**本批仅同步 README，采用用户提供的已核实记录，没有重新执行安装、测试、CI 查询或应用实网请求。** 各次验收分别绑定下文的提交与环境；已有成功记录不代表网络始终稳定，也不等于监听服务、外部 HTTP 访问或部署验收通过。
 
 ## 已实现功能
 
@@ -58,7 +58,7 @@ RepoPilot 当前是一个基于 FastAPI 的 Python 后端，支持健康检查�
 - 开发清单继续通过 `-r requirements.txt` 引入运行依赖，保留原有工具声明；开发清单合并后的直接依赖声明集合不变。
 - 第一批当时只调整声明归属；第二至第五批随后生成 Windows / CPython 3.14 和 Linux / CPython 3.12 的运行锁、开发锁，并分别完成全新环境实际安装、版本核对、`pip check`、运行冒烟及开发检查。
 - 锁文件固定完整依赖版本及 SHA-256 哈希；两平台的条件依赖分别由实际目标环境解析，开发锁包含同平台运行锁的全部包且共有版本一致。
-- 第六批将后端 CI 配置为 Ubuntu 24.04 / Python 3.12.16，在独立虚拟环境中严格安装 Linux 开发锁，再执行依赖兼容性和原四项质量检查。此处说明配置已完成，远程运行仍待后续验收。
+- 第六批将后端 CI 配置为 Ubuntu 24.04 / Python 3.12.16，在独立虚拟环境中严格安装 Linux 开发锁，再执行依赖兼容性和原四项质量检查。其后相关变更已提交、推送，并由 Backend CI #5 验证指定提交的 39 包开发环境；Ubuntu 纯运行环境尚未单独验证。
 
 以上是代码和配置中已有的能力；后面的“下一阶段计划”尚未实施。
 
@@ -106,7 +106,7 @@ RepoPilot/
 - `backend/requirements.txt`：维护 FastAPI、Uvicorn 和 HTTPX 三项运行直接依赖的版本范围，是生成运行锁的输入。
 - `backend/requirements-dev.txt`：通过 `-r requirements.txt` 引入运行声明，再维护 pytest、Ruff、mypy、pytest-cov 和测试客户端 httpx2 的版本范围，是生成开发锁的输入。
 - `backend/locks/windows-py314-runtime.txt`、`windows-py314-dev.txt`：Windows AMD64 / CPython 3.14.6 的完整运行、开发依赖及哈希。
-- `backend/locks/linux-py312-runtime.txt`、`linux-py312-dev.txt`：Debian 12 / x86_64 / CPython 3.12.16 的完整运行、开发依赖及哈希；其中开发锁也是本次准备接入 Ubuntu CI 的安装入口。
+- `backend/locks/linux-py312-runtime.txt`、`linux-py312-dev.txt`：Debian 12 / x86_64 / CPython 3.12.16 的完整运行、开发依赖及哈希；其中开发锁也已作为 Backend CI #5 的 Ubuntu 安装入口通过验收。
 - `backend/pyproject.toml`：保存 Ruff、pytest 和 mypy 配置；覆盖率通过 pytest 命令行参数启用。
 - `backend/app/__init__.py`：将 `app` 目录标识为 Python 包，便于导入其中的模块。
 - `backend/app/main.py`：FastAPI 应用入口，负责接收请求和组织响应。
@@ -134,7 +134,7 @@ RepoPilot/
 | `locks/windows-py314-runtime.txt` | Windows AMD64 / CPython 3.14.6，仅运行服务，22 个锁定包 |
 | `locks/windows-py314-dev.txt` | 同一 Windows 目标，包含运行依赖和开发工具，39 个锁定包 |
 | `locks/linux-py312-runtime.txt` | Debian 12 / x86_64 / glibc 2.36 / CPython 3.12.16，仅运行服务，23 个锁定包 |
-| `locks/linux-py312-dev.txt` | 同一 Debian 目标，包含运行依赖和开发工具，39 个锁定包；Ubuntu 24.04 / Python 3.12.16 CI 目标待远程验证 |
+| `locks/linux-py312-dev.txt` | 同一 Debian 目标，包含运行依赖和开发工具，39 个锁定包；同锁已通过 Backend CI #5 的 Ubuntu 24.04.5 / Python 3.12.16 x64 开发环境验收 |
 
 Linux 锁在实际 Debian 容器中生成并验证。基础镜像完整摘要为：
 
@@ -142,7 +142,7 @@ Linux 锁在实际 Debian 容器中生成并验证。基础镜像完整摘要为
 python@sha256:e697c81897302a4c4333bade000d98038fbb21eb064f8ee1fd42d02ebcd9d337
 ```
 
-Ruff 和 mypy 的目标版本仍是 Python 3.12。静态检查配置不会自动切换解释器，也不代表任意 Python 版本或 Linux 发行版均已验证。安装前先确认解释器版本、架构与所选锁匹配；本次 Ubuntu CI 的目标固定为 24.04 / x64 / Python 3.12.16，其运行结果不能由 Debian 验收推导。
+Ruff 和 mypy 的目标版本仍是 Python 3.12。静态检查配置不会自动切换解释器，也不代表任意 Python 版本或 Linux 发行版均已验证。安装前先确认解释器版本、架构与所选锁匹配。Ubuntu 24.04 / x64 / Python 3.12.16 开发环境已有独立的 Backend CI #5 结果，并非由 Debian 验收推导；该结果不覆盖 Ubuntu 纯运行锁的独立新环境。
 
 ### Windows PowerShell：CPython 3.14.6 / AMD64
 
@@ -195,7 +195,7 @@ python3.12 -m venv .venv
 
 `--require-hashes` 校验安装文件的哈希，`--only-binary=:all:` 要求使用 wheel（可直接安装的发行文件），不回退到源码构建。**向已有开发环境安装运行锁不会自动卸载开发包**，因此不能据此证明纯运行环境可用。安装后用对应虚拟环境的 `python -m pip check` 检查依赖兼容性。
 
-HTTPX 用于生产 GitHub 客户端，保留在运行声明；pytest、Ruff、mypy、pytest-cov、httpx2 属于开发声明。安装开发锁会包含运行依赖，但不把开发工具变成服务的运行依赖。两平台实际安装记录见下文；本批第六批未安装、升级或卸载任何包，也未创建虚拟环境。
+HTTPX 用于生产 GitHub 客户端，保留在运行声明；pytest、Ruff、mypy、pytest-cov、httpx2 属于开发声明。安装开发锁会包含运行依赖，但不把开发工具变成服务的运行依赖。各环境实际安装记录见下文；本批文档同步未安装、升级或卸载任何包，也未创建虚拟环境。
 
 ### 锁文件维护
 
@@ -578,7 +578,7 @@ Day 5 第四批文档与本地验收时，只更新 README，使用已有依赖�
 
 ### Day 5 提交与远程 CI 验收记录（历史）
 
-以下为此前已核实的验收记录，本批 Day 6 第六批只修改文档与 CI 配置，没有重新查询远程仓库或 CI：
+以下为此前已核实的验收记录，本批仅同步 README，没有重新查询远程仓库或 CI：
 
 - 提交：`0adebe6b11a244d33ea41466d305ec7377cd2598`。
 - 提交信息：`feat: review Python files from public GitHub repositories`。
@@ -594,7 +594,7 @@ Day 5 第四批文档与本地验收时，只更新 README，使用已有依赖�
 | 格式检查 | 14 个文件符合格式 |
 | mypy | 6 个源文件检查通过 |
 
-本地记录为 Python 3.14.6、333 条语句，CI 记录为 Python 3.12.15、347 条语句；两者分别保留，没有调查或推测统计差异的原因。这些历史结果不代表 Day 6 的锁定依赖与 CI 变更已经通过远程验证。
+本地记录为 Python 3.14.6、333 条语句，CI 记录为 Python 3.12.15、347 条语句；两者分别保留，没有调查或推测统计差异的原因。Day 6 的锁定依赖与 CI 验证另见下文绑定其完整 SHA 的 Backend CI #5 记录，不能将 Day 5 的结果算作 Day 6 的验收。
 
 ### Day 5 最小应用实网验收记录（历史）
 
@@ -609,11 +609,11 @@ Day 5 第四批文档与本地验收时，只更新 README，使用已有依赖�
 
 期间曾遇到匿名限流和连接超时，后续完成了上述成功场景；不能据此宣称网络始终稳定。验收没有启动监听服务，因此没有覆盖外部 HTTP 访问或部署验收，也不代表所有网络、代理、证书环境均已验证。
 
-本地离线测试、远程 CI 和最小应用实网验收是三份独立记录。本地和 CI 中的自动化测试使用模拟上游响应；最小实网记录才覆盖上述真实 GitHub 上游访问场景。本批 Day 6 第六批没有重新执行这三项验收。
+本地离线测试、远程 CI 和最小应用实网验收是三份独立记录。本地和 CI 中的自动化测试使用模拟上游响应；最小实网记录才覆盖上述真实 GitHub 上游访问场景。本批 README 同步没有重新执行这三项验收。
 
 ### Day 6 平台锁与全新环境验收记录（此前批次）
 
-以下记录来自 2026-10-30 已完成的 Windows 第三批和 Debian Linux 第五批验收，**不是本批第六批重跑的结果**。运行环境、开发环境各自新建，未继承旧项目环境的包；安装均要求哈希和可用 wheel，并保持 TLS 校验。
+以下记录来自 2026-10-30 已完成的 Windows 第三批和 Debian Linux 第五批验收，**第六批及本批文档同步均未重跑这些验收**。运行环境、开发环境各自新建，未继承旧项目环境的包；安装均要求哈希和可用 wheel，并保持 TLS 校验。
 
 | 项目 | Windows 本地历史结果 | Debian Linux 本地历史结果 |
 | --- | --- | --- |
@@ -634,7 +634,38 @@ Debian 使用上文完整镜像摘要；实际 Python 为 `3.12.16 (main, Oct 28
 
 上述覆盖率均为行覆盖率，未收集分支覆盖率；不推测两平台语句数差异的原因。运行冒烟通过进程内 TestClient 执行，没有启动监听端口，也没有调用 GitHub 业务接口。它们证明所述新环境中的安装与最小应用行为，不能替代 Ubuntu CI、外部 HTTP 访问或部署验收。
 
-本批第六批只调整 README 和 CI 配置，并做 YAML 与关键结构静态检查，未重跑以上安装、冒烟、pytest、Ruff 或 mypy。**Ubuntu 24.04 / Python 3.12.16 是本次准备的 CI 目标，Day 6 远程 CI 尚未执行或验证。**
+第六批当时只调整 README 和 CI 配置，并做 YAML 与关键结构静态检查，没有重跑以上安装、冒烟、pytest、Ruff 或 mypy。后续已完成 Day 6 提交、推送和 Ubuntu 开发环境 CI，结果按完整提交 SHA 单独记录如下；本批仅同步这些已核实记录。
+
+### Day 6 提交、推送与 Ubuntu CI 验收记录（历史，绑定指定提交）
+
+以下采用用户提供的已核实记录，**本批没有重新查询远程或执行验收**：
+
+- 提交及 CI `head_sha`：`2b0a4d9403d7831e04123c12181b6719eea75c79`。
+- 提交信息：`build: separate and lock backend dependencies`。
+- 已推送分支：`day4/github-api`。
+- 运行：[Backend CI #5](https://github.com/tiezhi7/RepoPilot/actions/runs/41097662670)，Run ID 为 `41097662670`。
+- 工作流文件：`.github/workflows/backend-ci.yml`；事件为 `push`，第 1 次运行。
+- 最终状态：`completed / success`，`Backend checks` 全部步骤成功。
+
+| 项目 | Day 6 Ubuntu 远程实际结果 |
+| --- | --- |
+| 环境 | Ubuntu 24.04.5 LTS，Python 3.12.16 x64 |
+| 独立虚拟环境 | 创建 `backend/.venv`，使用该环境的 pip 26.1.2 |
+| 严格依赖安装 | 从 `locks/linux-py312-dev.txt` 安装 39 个包，使用官方 PyPI、`--require-hashes` 和 `--only-binary=:all:` |
+| `pip check` | `No broken requirements found.` |
+| Ruff | `All checks passed!` |
+| 格式检查 | `14 files already formatted` |
+| mypy | 6 个源文件检查通过 |
+| pytest | `691 passed in 3.03s`，未报告警告或跳过项 |
+| `app` 行覆盖率 | 347 条语句、0 条未覆盖、100%，没有未覆盖行 |
+
+x64 根据实际 Python 发行包和安装的 x86_64 wheel 核实；该记录不声称日志执行过 `uname -m`。覆盖率口径为行覆盖率，未收集分支覆盖率。
+
+**该次 Ubuntu CI 验证的是开发锁的 39 包环境，没有单独验证 Ubuntu 纯运行环境。** Windows 和 Debian 的运行、开发环境结果仍以上一节各自的本地记录为准；两次运行环境 TestClient 弃用警告也继续保留，不因开发环境 CI 未报告警告而删除。
+
+这是对应上述完整 SHA 的历史验收记录。后续仅修改或提交 README 时，无需改写本记录的 SHA；其他提交的 CI 结果应另行按其自身完整 SHA 记录，不能自动沿用本次成功结论。
+
+本次 CI 使用离线自动化测试，没有进行应用真实访问 GitHub、监听服务、外部 HTTP 访问或部署验收。Day 5 已有最小应用实网历史记录继续保留；Day 6 新依赖环境中的应用实网验收、监听服务和部署验收仍需单独安排。本批仅同步文档，没有重新执行安装、测试、CI 查询或应用实网请求。
 
 ## Ruff 代码质量检查与格式检查
 
@@ -687,19 +718,19 @@ set -euo pipefail
 
 **此前 Day 4 远程验收记录：** 提交 `d584a95d48281ec19fa3429f90378366f2081c88` 已推送，Backend CI 成功，见[历史运行记录](https://github.com/tiezhi7/RepoPilot/actions/runs/40859087524)。该链接只代表 Day 4；Day 5 的成功运行是上文另列的 Backend CI #4。**本批 Day 6 未访问或重新查询这些运行。** CI 成功本身不能替代应用实网验收，后者按上文记录的场景单独完成。
 
-Day 5 提交已经由上述运行验证；Day 6 的依赖声明、四份锁、CI 和文档调整尚未提交，不在这些历史运行的验证范围内。**CI 配置已改用固定依赖，但 Day 6 的 Ubuntu 远程 CI 尚未执行或验证。** 本地 YAML 语法和结构检查不能替代 GitHub 实际执行，也不能用 Debian 通过推断 Ubuntu 通过。
+Day 4、Day 5 和 Day 6 的远程结果分别绑定各自历史提交。Day 6 的依赖声明、四份锁、CI 和文档调整已按上文完整 SHA 提交、推送，并通过 Backend CI #5 的 Ubuntu 开发环境验证。本批 README 同步属于此后的独立文档改动，不改变该历史运行的 `head_sha`，也不把已有 CI 成功结论自动延伸到其他提交。
 
-后续经授权提交并推送新变更后，可在仓库页面选择 **Actions → Backend CI → 对应运行记录 → Backend checks**，核对完整提交 SHA，再展开环境版本、严格安装、`pip check` 和四项检查的实际日志。参见 [GitHub 查看工作流运行历史](https://docs.github.com/en/actions/how-tos/monitor-workflows/view-workflow-run-history)。
+查看已记录的运行时，可在仓库页面选择 **Actions → Backend CI → 对应运行记录 → Backend checks**，核对完整提交 SHA，再展开环境版本、严格安装、`pip check` 和四项检查的实际日志。后续新提交的验收也应单独核对其 SHA。本批没有重新访问这些页面。参见 [GitHub 查看工作流运行历史](https://docs.github.com/en/actions/how-tos/monitor-workflows/view-workflow-run-history)。
 
 ## 下一阶段计划（尚未实施）
 
-Day 5 的提交推送、远程 CI 和最小应用实网验收已有历史记录；Day 6 已完成依赖分离、四份锁及 Windows / Debian 全新环境验收，本批另完成 CI 配置与文档同步。后续工作按独立范围进行：
+Day 5 的提交推送、远程 CI 和最小应用实网验收已有历史记录；Day 6 已完成依赖分离、四份锁、Windows / Debian 全新环境验收、完整差异审查、本地提交、推送及 Backend CI #5 的 Ubuntu 开发环境验收。本批只同步 README，后续工作按独立范围进行：
 
-1. 完整审阅累计八项变更及四份未跟踪锁文件的实际内容，确认范围和兼容性。
-2. 经授权创建本地提交、推送指定分支；本批不执行这些 Git 操作。
-3. 核对对应 Day 6 完整提交 SHA 的 Ubuntu 24.04 / Python 3.12.16 CI 日志，记录真实安装、哈希、`pip check` 及四项检查结果，不预填测试数量或覆盖率。
+1. 经单独授权提交并推送本次 README 同步改动，保留 Day 6 历史记录对应的完整 SHA；本批不执行提交或推送。
+2. 如需验证 Ubuntu 纯运行环境，另建干净环境仅安装 Linux 运行锁并独立验收，不能以现有 39 包开发环境代替。
+3. 单独安排 Day 6 新依赖环境中的 GitHub 应用实网验收；Day 5 的最小实网记录不改写，本次离线 CI 不能替代新的实网结果。
 4. 单独安排监听服务及外部 HTTP 访问验收；进程内 TestClient 成功不代表监听服务已验证。
-5. 单独安排部署验收，并在需要时另行授权复验新依赖环境中的 GitHub 实网访问；Day 5 的最小实网成功记录继续保留，不能由本次离线结果推导新环境的网络表现。
+5. 单独安排部署验收，不从本次离线 CI 或进程内测试推导部署结果。
 
 应用级限流、缓存和覆盖率门槛也需要后续单独评估；本批未添加。
 
