@@ -4,7 +4,7 @@ RepoPilot 当前是一个基于 FastAPI 的 Python 后端，支持健康检查�
 
 项目的长期目标是发展为面向 GitHub 的 AI 代码审查助手。当前尚未接入 AI；调用文件审查接口时，只读取默认分支中指定的一个受限 Python 文件，不扫描整个仓库。源码只作为 AST 分析的数据，不执行、导入或保存。
 
-仓库已提供 GitHub Actions 持续集成配置。此前已核实：Day 5 提交已推送，Backend CI #4 成功，并在 2026-10-30 完成最小应用实网验收，详见下文历史记录。Day 6 已分离依赖声明、生成四份平台锁、完成 Windows 与 Debian Linux 全新环境验收，相关变更已提交并推送，Ubuntu 开发环境的 Backend CI #5 也已成功。**本批仅同步 README，采用用户提供的已核实记录，没有重新执行安装、测试、CI 查询或应用实网请求。** 各次验收分别绑定下文的提交与环境；已有成功记录不代表网络始终稳定，也不等于监听服务、外部 HTTP 访问或部署验收通过。
+仓库已提供 GitHub Actions 持续集成配置。此前已核实：Day 5 提交已推送，Backend CI #4 成功，并在 2026-10-30 完成最小应用实网验收，详见下文历史记录。Day 6 已分离依赖声明、生成四份平台锁、完成 Windows 与 Debian Linux 全新环境验收，相关变更已提交并推送，Ubuntu 开发环境的 Backend CI #5 也已成功。Day 7 第一批进一步在全新 Windows 运行环境中完成真实本机 HTTP 监听验收，覆盖健康检查、文档和源码审查。**本批 Day 7 第二批仅同步 README，没有重新执行安装、HTTP 验收、历史检查或 CI 查询。** 各次验收分别绑定下文的提交与环境；本机监听结果不代表两个 GitHub 业务接口的真实 HTTP 行为、其他机器访问或生产部署已验收。
 
 ## 已实现功能
 
@@ -60,7 +60,15 @@ RepoPilot 当前是一个基于 FastAPI 的 Python 后端，支持健康检查�
 - 锁文件固定完整依赖版本及 SHA-256 哈希；两平台的条件依赖分别由实际目标环境解析，开发锁包含同平台运行锁的全部包且共有版本一致。
 - 第六批将后端 CI 配置为 Ubuntu 24.04 / Python 3.12.16，在独立虚拟环境中严格安装 Linux 开发锁，再执行依赖兼容性和原四项质量检查。其后相关变更已提交、推送，并由 Backend CI #5 验证指定提交的 39 包开发环境；Ubuntu 纯运行环境尚未单独验证。
 
-以上是代码和配置中已有的能力；后面的“下一阶段计划”尚未实施。
+### Day 7：Windows 本机 HTTP 监听验收
+
+- 使用 Windows 运行锁安装全新 CPython 3.14.6 运行环境，核对 22 个包版本并通过 `pip check`。
+- 启动独立、单进程 Uvicorn，仅监听 `127.0.0.1`，由操作系统分配端口；普通 HTTPX 客户端经真实 TCP 完成九项响应断言。
+- 验证健康、Swagger UI HTML、四个业务路由的 OpenAPI 声明和源码审查；未调用两个 GitHub 业务接口。
+- 第一批已关闭客户端、停止该批服务并确认原监听释放；首次临时脚本 PID 核对失败及修正经过保留在下文记录中。
+- 第二批仅整理启动说明和既有验收记录，没有增加业务功能或重跑验收。
+
+以上为已有功能、配置与已完成的验收；后面的“下一阶段计划”尚未实施。
 
 ## 项目结构
 
@@ -235,7 +243,41 @@ Linux：
 - 健康检查：`http://127.0.0.1:8000/health`
 - 可交互的接口文档：`http://127.0.0.1:8000/docs`
 
-打开 `/docs` 不会自动请求 GitHub；在页面执行两个 GitHub 接口会触发真实上游请求。本批 Day 6 没有启动服务或执行实网请求；此前最小实网验收使用进程内接口流程，没有启动监听服务。
+打开 `/docs` 不会自动请求 GitHub；在页面执行两个 GitHub 接口会触发真实上游请求。上面是保留的开发启动说明，本批没有执行。Day 5 最小实网验收采用进程内接口流程，当时没有启动监听服务；后续 Day 7 第一批的本机监听验收单独记录于下文。
+
+### Windows 本地监听验收：手动复用示例
+
+以下仅为手动启动参考，没有在本批执行，也不是第一批自动验收脚本的逐字重现。先使用版本已核实的 **Windows AMD64 / CPython 3.14.6** 创建独立新运行环境，按“环境准备”从 `locks/windows-py314-runtime.txt` 严格安装，固定 pip 26.1.2，并完成逐包核对和 `pip check`。已有开发环境不能代替纯运行环境。
+
+把下面三个示例路径替换为实际存在的绝对路径：`$runtimePython` 指向新运行环境的解释器，`$backendDir` 指向真实项目的 `backend`，`$listenWorkDir` 是专用临时工作目录。不要依赖默认 `python`，也不要覆盖旧 `.venv`。
+
+```powershell
+# 以下均为路径占位示例，须先替换，不能直接照搬运行。
+$runtimePython = 'C:\path\to\new-runtime\Scripts\python.exe'
+$backendDir = 'C:\path\to\RepoPilot\backend'
+$listenWorkDir = 'C:\path\to\http-check-workdir'
+
+& $runtimePython -B -c "import sys, platform; print(sys.version); print(platform.machine())"
+# 确认输出为 CPython 3.14.6 / AMD64 后再启动。
+Set-Location -LiteralPath $listenWorkDir
+& $runtimePython -B -m uvicorn app.main:app --app-dir $backendDir --host 127.0.0.1 --port 0 --workers 1
+```
+
+`-B` 避免生成 Python 字节码缓存；`--app-dir` 让 Uvicorn 从指定应用目录加载 `app.main:app`。此方式不启用 reload，使用一个服务进程。`--port 0` 由操作系统分配空闲端口，必须从 `Uvicorn running on http://127.0.0.1:<实际端口>` 日志读取，不能沿用某次历史端口。
+
+保持启动窗口运行，可在另一个 PowerShell 窗口核对当前监听信息；下面也只是手动检查示例，本批未执行：
+
+```powershell
+$actualPort = [int](Read-Host '输入本次启动日志中的实际端口')
+Get-NetTCPConnection -State Listen -LocalPort $actualPort |
+    Select-Object LocalAddress, LocalPort, OwningProcess
+```
+
+确认地址为 `127.0.0.1`，并将 `OwningProcess` 与 Uvicorn 日志中的实际服务 PID 对照，再核对其进程路径及父子关系，确认属于本次启动。Windows 虚拟环境的启动器 PID 与实际监听 PID 可能不同，不能只比较启动器 PID。
+
+手动前台启动可先尝试 `Ctrl+C` 关闭；这是操作说明，不是下文自动验收实际使用的停止方式。停止后仍需确认本次启动器和实际服务进程已退出，原监听不再由它们占用。必要时仅处理已确认归属本次启动的 PID，不按 Python/Uvicorn 名称批量结束进程，也不要求修改执行策略或防火墙。
+
+旧项目 `.venv` 曾出现启动退出 `103`，原因仍未定位。Day 7 验收使用全新环境，没有通过修改配置修复旧环境；本示例也不要求使用或修复它。
 
 ## 接口与审查规则
 
@@ -444,13 +486,14 @@ URL 和文件路径校验函数本身不进行 DNS 或 HTTP 请求；仓库或�
 - **不提供完整安全分析或安全保证。** 当前规则不是完整的漏洞扫描，也没有沙箱执行或进程隔离。已有源码长度、远程文件字节和文件响应体大小限制，但不能替代完整的 CPU、内存、并发及总耗时资源隔离。
 - **GitHub 范围受限。** 只支持公开仓库元数据查询和默认分支单个 Python 文件读取审查；不读取 PR 或 diff，不支持私有仓库、Token、webhook 或自动发布评论；GitHub Actions 仅负责验证本项目。
 - **GitHub 客户端没有重试、缓存或认证。** 当前也没有调用方鉴权或应用级请求限流；文件读取有受限响应体和源码配额，元数据查询尚无相同的流式正文限制，不属于完整的生产环境防护。
-- **网络配置固定。** `trust_env=False`，不会自动采用环境代理或自定义证书变量；需要代理或企业证书的环境可能无法直接连接。2026-10-30 已完成最小应用实网验收，但期间也遇到匿名限流和连接超时，不保证所有网络环境或后续请求始终可用；外部 HTTP 访问和部署验收仍未覆盖。
+- **网络配置固定。** `trust_env=False`，不会自动采用环境代理或自定义证书变量；需要代理或企业证书的环境可能无法直接连接。2026-10-30 已完成最小应用实网验收，但期间也遇到匿名限流和连接超时，不保证所有网络环境或后续请求始终可用；其他机器访问和生产部署仍未验收。
+- **本机监听验收范围有限。** Day 7 第一批只通过 `127.0.0.1` 验证健康、文档及源码审查。OpenAPI 中存在两个 GitHub 路由不代表已调用它们；不能据此宣称所有 GitHub 路由的真实 HTTP 行为已验收。
 - **没有 AI 审查。** 不调用 LLM（大语言模型）或付费 AI API，不生成 AI 修复建议。
 - **没有产品前端、数据库或审查记录持久化。** `/docs` 是 FastAPI 提供的接口调试文档。
 
 ## 手动验证
 
-保持服务运行，在另一个 PowerShell 窗口执行：
+以下为开发启动默认端口 `8000` 的手动示例。保持服务运行，在另一个 PowerShell 窗口执行；若采用上面的 `--port 0` 方式，先将 URL 中端口替换为本次启动日志的实际值：
 
 ```powershell
 Invoke-RestMethod -Uri 'http://127.0.0.1:8000/health'
@@ -464,7 +507,7 @@ $reviewResult | ConvertTo-Json -Depth 5
 
 第一个请求应返回 `status: ok`；第二个应返回 `language: python`、`issue_count: 1` 和一条 `PY_PRINT` 提示。也可在 `/docs` 页面直接试用接口。
 
-上面的健康检查和源码提交接口不需要 GitHub 网络。访问 `/docs` 也不会自动查询 GitHub；在文档页面执行仓库元数据查询或文件审查接口会发出真实 GitHub 请求。本批 Day 6 未执行这些命令；此前最小实网验收的范围和结果见下文历史记录。
+上面的健康检查和源码提交接口不需要 GitHub 网络。访问 `/docs` 也不会自动查询 GitHub；在文档页面执行仓库元数据查询或文件审查接口会发出真实 GitHub 请求。本批文档同步未执行这些命令；Day 5 最小 GitHub 实网验收和 Day 7 本机 HTTP 验收的范围与结果分别见下文历史记录。
 
 ## 运行自动化测试
 
@@ -547,7 +590,7 @@ Linux：
 
 ### Day 5 本地全量验收记录（历史，提交前）
 
-执行日期：2026-10-29（本机时区 UTC+08:00）。当时使用已有的 `backend/.venv`，实际解释器为 **Python 3.14.6**，覆盖率报告平台为 `win32`。CI 和静态检查的目标为 Python 3.12，该次本地验收没有切换解释器。这是此前记录，本批 Day 6 未重新执行。
+执行日期：2026-10-29（本机时区 UTC+08:00）。当时使用已有的 `backend/.venv`，实际解释器为 **Python 3.14.6**，覆盖率报告平台为 `win32`。CI 和静态检查的目标为 Python 3.12，该次本地验收没有切换解释器。这是此前记录，本批文档同步未重新执行。
 
 以下命令在当时的 `backend` 目录依次执行，每项均记录了实际退出码：
 
@@ -598,7 +641,7 @@ Day 5 第四批文档与本地验收时，只更新 README，使用已有依赖�
 
 ### Day 5 最小应用实网验收记录（历史）
 
-日期：**2026-10-30，北京时间**。以下也是此前已核实记录，本批 Day 6 没有重新执行。验收通过进程内 FastAPI 接口流程，使用生产 GitHub 客户端和真实 GitHub HTTPS 请求：
+日期：**2026-10-30，北京时间**。以下也是此前已核实记录，本批文档同步没有重新执行。验收通过进程内 FastAPI 接口流程，使用生产 GitHub 客户端和真实 GitHub HTTPS 请求：
 
 | 场景 | 历史结果 |
 | --- | --- |
@@ -665,7 +708,37 @@ x64 根据实际 Python 发行包和安装的 x86_64 wheel 核实；该记录不
 
 这是对应上述完整 SHA 的历史验收记录。后续仅修改或提交 README 时，无需改写本记录的 SHA；其他提交的 CI 结果应另行按其自身完整 SHA 记录，不能自动沿用本次成功结论。
 
-本次 CI 使用离线自动化测试，没有进行应用真实访问 GitHub、监听服务、外部 HTTP 访问或部署验收。Day 5 已有最小应用实网历史记录继续保留；Day 6 新依赖环境中的应用实网验收、监听服务和部署验收仍需单独安排。本批仅同步文档，没有重新执行安装、测试、CI 查询或应用实网请求。
+该次 CI 使用离线自动化测试，没有进行应用真实访问 GitHub、监听服务、外部 HTTP 访问或部署验收。Day 5 已有最小应用实网历史记录继续保留。该次 CI 当时未覆盖的监听链路，后续已在 Day 7 第一批单独完成 Windows 本机验收；新依赖环境中的 GitHub 应用实网、其他机器访问和生产部署仍需单独安排。本批仅同步文档，没有重新执行安装、测试、CI 查询或应用实网请求。
+
+### Day 7 Windows 本机 HTTP 监听验收记录（第一批已完成）
+
+验收对象提交：`5fa9a40c1dd4f938a43737e892ebd637ff7f6663`。以下记录属于已完成的 Day 7 第一批；**本批第二批仅同步 README，没有重新运行安装、HTTP 验收或历史检查，也没有查询 CI。**
+
+实际环境为 **Windows AMD64 / CPython 3.14.6**，使用全新独立运行环境，未复用旧项目 `.venv`，未启用 system-site-packages。引导包 pip 固定为 **26.1.2**；从官方 PyPI 安装 Windows 运行锁，保持 TLS 校验，启用 `--require-hashes` 和 `--only-binary=:all:`。22 个运行包版本全部匹配锁文件，无开发依赖；`pip check` 通过，返回 `No broken requirements found.`。
+
+自动验收以该新环境的绝对解释器路径启动独立 Uvicorn 进程，使用 `-B`、真实 `backend` 的 `--app-dir`、`--host 127.0.0.1`、`--port 0`、`--workers 1`，未启用 reload。工作目录、脚本、日志和缓存均放在专用临时目录；监听地址及实际服务 PID 的归属已核对。
+
+请求使用普通 HTTPX Client，明确设置超时、`trust_env=False`、`follow_redirects=False`，经真实本机 TCP 访问服务。没有使用 `TestClient`、`ASGITransport`、`MockTransport` 或依赖覆盖替代网络链路。
+
+| 实际场景 | HTTP 状态 | 响应断言结果 |
+| --- | --- | --- |
+| 初始 `GET /health` | `200` | JSON 为 `{"status":"ok"}` |
+| `GET /docs` | `200` | 返回 Swagger UI HTML；只检查本地 HTML，未打开浏览器或加载 CDN |
+| `GET /openapi.json` | `200` | 包含四个业务路由，`/health` 为 GET，其余三个为 POST |
+| 提交 `x = 1` | `200` | `language: python`、`issue_count: 0`、`issues: []` |
+| 提交 `print('day7')` | `200` | 恰好一个 `PY_PRINT`，`severity: info`，`line: 1` |
+| 提交 `def broken(:` | `200` | 恰好一个 `PY_SYNTAX`，`severity: error` |
+| 提交空字符串 | `422` | `detail` 为验证错误数组 |
+| 提交含 `raise RuntimeError('must not execute')` 的源码 | `200` | 零问题，源码未执行 |
+| 最后再次 `GET /health` | `200` | `status: ok`，服务仍正常 |
+
+首次临时脚本把启动器 PID 当成实际监听 PID，导致 PID 核对失败，当时尚未发送 HTTP 请求。保留首次失败记录并清理该次服务后，仅修正临时脚本，通过父子进程关系确认实际监听 PID 的归属，随后九项真实响应断言全部通过；不能写成首次执行即全部通过。
+
+清理结果：客户端在 `finally` 中关闭，通过 `CTRL_BREAK_EVENT` 发起服务关闭，未执行强制终止。**启动器返回码为 `3`；实际监听进程已退出，其独立退出码未单独记录。** 日志包含 `Application shutdown complete` 和 `Finished server process`，原监听已释放。这里保留实际返回码，不将 `3` 改写为 `0`，也不将其解释为已经证明的某种固定、正常 Uvicorn 退出码。
+
+该次验收未发现 Python 或服务弃用警告；旧 `.venv` 历史退出 `103` 的原因仍未定位，未修复旧环境或修改其配置。项目 25 个文件的清单及 SHA-256 前后均未变，分支和提交不变，工作区干净、暂存区为空。
+
+**结论仅适用于上述 Windows 新运行环境的本机 HTTP 监听链路。** 该次没有调用两个 GitHub 业务接口或请求真实 GitHub，没有验证其他机器访问或执行生产部署；不扩大为所有 GitHub 路由的真实 HTTP 行为已验收。Day 5 的真实 GitHub 历史记录、Day 6 的离线检查和本次本机 TCP 验收分别保留；CI #5 仍绑定其原提交，不用来代表此文档或其他提交的 CI。
 
 ## Ruff 代码质量检查与格式检查
 
@@ -716,21 +789,21 @@ set -euo pipefail
 
 任务仅申请 `permissions: contents: read`，无需手动配置密钥。没有增加矩阵、容器 job、缓存、部署或发布；任意安装、哈希校验或检查失败都会使 job 失败，未设置忽略失败。覆盖率仍只测量行覆盖率，没有最低覆盖率门槛。
 
-**此前 Day 4 远程验收记录：** 提交 `d584a95d48281ec19fa3429f90378366f2081c88` 已推送，Backend CI 成功，见[历史运行记录](https://github.com/tiezhi7/RepoPilot/actions/runs/40859087524)。该链接只代表 Day 4；Day 5 的成功运行是上文另列的 Backend CI #4。**本批 Day 6 未访问或重新查询这些运行。** CI 成功本身不能替代应用实网验收，后者按上文记录的场景单独完成。
+**此前 Day 4 远程验收记录：** 提交 `d584a95d48281ec19fa3429f90378366f2081c88` 已推送，Backend CI 成功，见[历史运行记录](https://github.com/tiezhi7/RepoPilot/actions/runs/40859087524)。该链接只代表 Day 4；Day 5 的成功运行是上文另列的 Backend CI #4。**本批文档同步未访问或重新查询这些运行。** CI 成功本身不能替代应用实网验收，后者按上文记录的场景单独完成。
 
-Day 4、Day 5 和 Day 6 的远程结果分别绑定各自历史提交。Day 6 的依赖声明、四份锁、CI 和文档调整已按上文完整 SHA 提交、推送，并通过 Backend CI #5 的 Ubuntu 开发环境验证。本批 README 同步属于此后的独立文档改动，不改变该历史运行的 `head_sha`，也不把已有 CI 成功结论自动延伸到其他提交。
+Day 4、Day 5 和 Day 6 的远程结果分别绑定各自历史提交。Day 6 的依赖声明、四份锁、CI 和文档调整对应提交 `2b0a4d9403d7831e04123c12181b6719eea75c79`，已推送并通过 Backend CI #5 的 Ubuntu 开发环境验证。Day 7 本机 HTTP 记录另绑定 `5fa9a40c1dd4f938a43737e892ebd637ff7f6663`。本批 README 同步属于此后的独立文档改动，不改变历史运行的 `head_sha`，也不把已有 CI 成功结论自动延伸到其他提交。
 
 查看已记录的运行时，可在仓库页面选择 **Actions → Backend CI → 对应运行记录 → Backend checks**，核对完整提交 SHA，再展开环境版本、严格安装、`pip check` 和四项检查的实际日志。后续新提交的验收也应单独核对其 SHA。本批没有重新访问这些页面。参见 [GitHub 查看工作流运行历史](https://docs.github.com/en/actions/how-tos/monitor-workflows/view-workflow-run-history)。
 
 ## 下一阶段计划（尚未实施）
 
-Day 5 的提交推送、远程 CI 和最小应用实网验收已有历史记录；Day 6 已完成依赖分离、四份锁、Windows / Debian 全新环境验收、完整差异审查、本地提交、推送及 Backend CI #5 的 Ubuntu 开发环境验收。本批只同步 README，后续工作按独立范围进行：
+Day 5 的提交推送、远程 CI 和最小应用实网验收已有历史记录；Day 6 已完成依赖分离、四份锁、Windows / Debian 全新环境验收、完整差异审查、本地提交、推送及 Backend CI #5 的 Ubuntu 开发环境验收。Day 7 第一批已在全新 Windows 运行环境完成本机 HTTP 监听验收，第二批仅同步 README，后续工作按独立范围进行：
 
-1. 经单独授权提交并推送本次 README 同步改动，保留 Day 6 历史记录对应的完整 SHA；本批不执行提交或推送。
+1. 经单独授权审阅、提交并推送本次 README 同步改动，保留各历史验收记录对应的完整 SHA；本批不执行提交或推送。
 2. 如需验证 Ubuntu 纯运行环境，另建干净环境仅安装 Linux 运行锁并独立验收，不能以现有 39 包开发环境代替。
-3. 单独安排 Day 6 新依赖环境中的 GitHub 应用实网验收；Day 5 的最小实网记录不改写，本次离线 CI 不能替代新的实网结果。
-4. 单独安排监听服务及外部 HTTP 访问验收；进程内 TestClient 成功不代表监听服务已验证。
-5. 单独安排部署验收，不从本次离线 CI 或进程内测试推导部署结果。
+3. 单独安排新依赖环境中的 GitHub 应用实网验收；如需覆盖经监听服务调用两个 GitHub 业务接口的行为，也应独立验收。Day 5 最小实网记录不改写，Day 7 本机验收未执行这些调用。
+4. 如需验证其他机器访问，先单独确定访问范围再验收，不能由已完成的 Windows `127.0.0.1` 监听结果推导。
+5. 单独安排生产部署验收，不从离线 CI、进程内测试或本机 HTTP 结果推导部署通过。
 
 应用级限流、缓存和覆盖率门槛也需要后续单独评估；本批未添加。
 
