@@ -1,0 +1,24 @@
+# Allow only build controls, the Linux runtime lock and Python application source.
+**
+!Dockerfile
+!.dockerignore
+!locks/
+locks/**
+!locks/linux-py312-runtime.txt
+!app/
+app/**
+!app/**/*.py
+
+# These stay excluded even when nested inside the application tree.
+**/.venv/**
+**/venv/**
+**/tests/**
+**/__pycache__/**
+**/.pytest_cache/**
+**/.mypy_cache/**
+**/.ruff_cache/**
+**/.git/**
+**/.env
+**/.env.*
+**/*.pyc
+**/*.pyo

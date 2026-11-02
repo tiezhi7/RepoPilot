@@ -1,10 +1,12 @@
 # RepoPilot
 
-RepoPilot 当前是一个基于 FastAPI 的 Python 后端，支持健康检查、提交 Python 源码审查、GitHub 公开仓库元数据查询，以及公开仓库中单个 Python 文件的静态审查。审查使用 Python 标准库 AST（抽象语法树，即代码的结构化表示），GitHub 查询和文件读取使用 HTTPX。
+RepoPilot 当前是一个基于 FastAPI 的 Python 后端，支持健康检查、提交 Python 源码审查、GitHub 公开仓库元数据查询，以及公开仓库中单个 Python 文件的静态审查。审查使用 Python 标准库 AST（抽象语法树，即代码的结构化表示），GitHub 查询和文件读取使用 HTTPX。项目也提供 Linux Docker 运行镜像配置，已完成本地构建、镜像内容检查和 Windows 经 Docker Desktop 访问容器的本机 HTTP 验收。
 
 项目的长期目标是发展为面向 GitHub 的 AI 代码审查助手。当前尚未接入 AI；调用文件审查接口时，只读取默认分支中指定的一个受限 Python 文件，不扫描整个仓库。源码只作为 AST 分析的数据，不执行、导入或保存。
 
-仓库已提供 GitHub Actions 持续集成配置。此前已核实：Day 5 提交已推送，Backend CI #4 成功，并在 2026-10-30 完成最小应用实网验收，详见下文历史记录。Day 6 已分离依赖声明、生成四份平台锁、完成 Windows 与 Debian Linux 全新环境验收，相关变更已提交并推送，Ubuntu 开发环境的 Backend CI #5 也已成功。Day 7 第一批进一步在全新 Windows 运行环境中完成真实本机 HTTP 监听验收，覆盖健康检查、文档和源码审查。**本批 Day 7 第二批仅同步 README，没有重新执行安装、HTTP 验收、历史检查或 CI 查询。** 各次验收分别绑定下文的提交与环境；本机监听结果不代表两个 GitHub 业务接口的真实 HTTP 行为、其他机器访问或生产部署已验收。
+仓库已提供 GitHub Actions 持续集成配置。此前已核实：Day 5 提交已推送，Backend CI #4 成功，并在 2026-10-30 完成最小应用实网验收，详见下文历史记录。Day 6 已分离依赖声明、生成四份平台锁、完成 Windows 与 Debian Linux 全新环境验收，相关变更已提交并推送，Ubuntu 开发环境的 Backend CI #5 也已成功。Day 7 第一批在全新 Windows 运行环境中完成本机 HTTP 监听验收；Day 8 第一、第二批进一步完成 Docker 本地构建和容器端口映射链路验收，均覆盖健康检查、文档和源码审查。
+
+**本批 Day 8 第三批仅更新 README，没有重新执行构建、安装、容器启动、HTTP 验收、其他测试或 CI 查询。** 各次验收分别绑定下文的业务源码基线、配置与环境；当前 CI 不包含 Docker 检查。本机监听及容器结果不代表两个 GitHub 业务接口的真实 HTTP 行为、其他机器访问限制或生产部署已验收。
 
 ## 已实现功能
 
@@ -68,6 +70,14 @@ RepoPilot 当前是一个基于 FastAPI 的 Python 后端，支持健康检查�
 - 第一批已关闭客户端、停止该批服务并确认原监听释放；首次临时脚本 PID 核对失败及修正经过保留在下文记录中。
 - 第二批仅整理启动说明和既有验收记录，没有增加业务功能或重跑验收。
 
+### Day 8：Docker 运行镜像与容器 HTTP 验收
+
+- 新增 `backend/Dockerfile` 和允许列表形式的 `backend/.dockerignore`，以 `backend` 为构建上下文，固定基础镜像和 Linux 运行锁。
+- 镜像使用 `/opt/venv`、非 root 用户 `10001:10001` 和复制进镜像的应用源码，不含开发专用依赖；主机代码修改后需重新构建。
+- 第一批完成实际构建上下文、镜像内容及依赖检查；保留下载超时、最小参数调整和非 root pip 缓存警告记录。
+- 第二批通过 Windows 宿主机动态端口完成九项真实容器 HTTP 断言，验证日志、SIGTERM 停止、状态、端口释放和本批容器删除。
+- 第三批仅同步 README，未重跑构建或验收。验收时两个 Docker 配置尚未提交；当前 CI 仍只检查 Python 依赖与代码质量，没有 Docker 构建或容器 HTTP 步骤。
+
 以上为已有功能、配置与已完成的验收；后面的“下一阶段计划”尚未实施。
 
 ## 项目结构
@@ -81,6 +91,8 @@ RepoPilot/
 ├── .gitignore
 ├── README.md
 └── backend/
+    ├── Dockerfile
+    ├── .dockerignore
     ├── requirements.txt
     ├── requirements-dev.txt
     ├── pyproject.toml
@@ -111,6 +123,8 @@ RepoPilot/
 - `.gitignore`：告诉 Git 哪些文件不需要纳入版本管理。
 - `README.md`：介绍项目、目录结构及使用方式。
 - `.github/workflows/backend-ci.yml`：定义 GitHub Actions 后端检查任务。
+- `backend/Dockerfile`：定义固定 Linux 基础镜像、严格运行锁安装、非 root 用户和默认 Uvicorn 启动命令。
+- `backend/.dockerignore`：以允许列表限制 `backend` 构建上下文，排除虚拟环境、测试、缓存及其他无关输入。
 - `backend/requirements.txt`：维护 FastAPI、Uvicorn 和 HTTPX 三项运行直接依赖的版本范围，是生成运行锁的输入。
 - `backend/requirements-dev.txt`：通过 `-r requirements.txt` 引入运行声明，再维护 pytest、Ruff、mypy、pytest-cov 和测试客户端 httpx2 的版本范围，是生成开发锁的输入。
 - `backend/locks/windows-py314-runtime.txt`、`windows-py314-dev.txt`：Windows AMD64 / CPython 3.14.6 的完整运行、开发依赖及哈希。
@@ -243,7 +257,7 @@ Linux：
 - 健康检查：`http://127.0.0.1:8000/health`
 - 可交互的接口文档：`http://127.0.0.1:8000/docs`
 
-打开 `/docs` 不会自动请求 GitHub；在页面执行两个 GitHub 接口会触发真实上游请求。上面是保留的开发启动说明，本批没有执行。Day 5 最小实网验收采用进程内接口流程，当时没有启动监听服务；后续 Day 7 第一批的本机监听验收单独记录于下文。
+打开 `/docs` 不会自动请求 GitHub；在页面执行两个 GitHub 接口会触发真实上游请求。上面是保留的开发启动说明，本批没有执行。Day 5 最小实网验收采用进程内接口流程，当时没有启动监听服务；后续 Day 7 Windows 本机监听及 Day 8 容器 HTTP 验收分别记录于下文。
 
 ### Windows 本地监听验收：手动复用示例
 
@@ -278,6 +292,127 @@ Get-NetTCPConnection -State Listen -LocalPort $actualPort |
 手动前台启动可先尝试 `Ctrl+C` 关闭；这是操作说明，不是下文自动验收实际使用的停止方式。停止后仍需确认本次启动器和实际服务进程已退出，原监听不再由它们占用。必要时仅处理已确认归属本次启动的 PID，不按 Python/Uvicorn 名称批量结束进程，也不要求修改执行策略或防火墙。
 
 旧项目 `.venv` 曾出现启动退出 `103`，原因仍未定位。Day 7 验收使用全新环境，没有通过修改配置修复旧环境；本示例也不要求使用或修复它。
+
+## 使用 Docker 运行后端（PowerShell）
+
+以下是可复用的手动示例，**本批只审阅文档，没有执行这些命令**。先确认 Docker Desktop 的 `desktop-linux` 引擎可用，在同一个 PowerShell 窗口按顺序操作，并替换路径占位符。镜像仅在本地构建和使用，本项目没有发布可供公共拉取的应用镜像。
+
+构建上下文是 Docker 可以读取的输入目录，**必须使用 `backend`，不能使用仓库根目录**。Dockerfile 采用“环境准备”中记录的固定基础镜像摘要，目标为 Debian 12 / Linux AMD64 / CPython 3.12.16。它创建 `/opt/venv`，固定 pip 26.1.2，从官方 PyPI 以哈希校验、仅 wheel 的方式安装 `locks/linux-py312-runtime.txt` 并执行 `pip check`；不安装开发锁或 pip-tools。
+
+`.dockerignore` 使用允许列表，只放行 Dockerfile、.dockerignore、Linux 运行锁和 `app` 中的 Python 源码及必要包目录，排除虚拟环境、测试、缓存、字节码、.env、Git 数据及其他锁文件。镜像只复制 `app` 源码，工作目录为 `/app`，运行用户为 `10001:10001`；依赖和服务均显式使用 `/opt/venv/bin/python`。**主机源码不会自动同步进镜像；修改后需要重新构建。**
+
+### 构建本地镜像
+
+```powershell
+$repoDir = 'C:\path\to\RepoPilot'  # 替换为真实项目绝对路径
+$backendDir = Join-Path $repoDir 'backend'
+$imageTag = 'repopilot-local:day8-' + [guid]::NewGuid().ToString('N')
+$containerName = 'repopilot-http-' + [guid]::NewGuid().ToString('N')
+
+docker --context desktop-linux buildx build --platform linux/amd64 --load --progress plain `
+    --tag $imageTag --file (Join-Path $backendDir 'Dockerfile') $backendDir
+if ($LASTEXITCODE -ne 0) { throw '构建失败，先检查日志，不继续启动容器。' }
+
+$imageId = docker --context desktop-linux image inspect --format '{{.Id}}' $imageTag
+if ($LASTEXITCODE -ne 0) { throw '无法读取已构建的本地镜像。' }
+$imageId = $imageId.Trim()
+```
+
+`--platform linux/amd64` 指定目标平台，`--load` 将 buildx 构建结果加载到本地镜像存储。示例使用唯一标签，避免覆盖其他镜像；`$imageId` 是本机镜像标识，不是可从公共仓库直接拉取的镜像地址。Dockerfile 两处安装命令的 `--timeout 60 --retries 2` 用于下载等待和内部重试，不是整个构建最多耗时 60 秒；保持官方 PyPI 和 TLS 校验。
+
+### 启动默认服务并读取动态端口
+
+```powershell
+$containerId = docker --context desktop-linux run --pull=never --detach `
+    --name $containerName --network bridge --publish 127.0.0.1::8000/tcp $imageId
+if ($LASTEXITCODE -ne 0) { throw '启动失败，先按本次唯一名称核查容器和日志，不重复启动。' }
+$containerId = $containerId.Trim()
+if ($containerId -notmatch '^[a-f0-9]{64}$') { throw '未获得明确的本批容器 ID。' }
+
+docker --context desktop-linux port $containerId 8000/tcp
+$portJson = docker --context desktop-linux container inspect `
+    --format '{{json .NetworkSettings.Ports}}' $containerId
+if ($LASTEXITCODE -ne 0) { throw '端口核对失败，保留本批容器 ID 以便收集日志和清理。' }
+$portMap = $portJson | ConvertFrom-Json
+$bindings = @($portMap.'8000/tcp')
+if ($bindings.Count -ne 1 -or $bindings[0].HostIp -ne '127.0.0.1') {
+    throw '端口映射不符合预期，先收集日志并停止本批容器。'
+}
+$actualPort = [int]$bindings[0].HostPort
+$baseUrl = 'http://127.0.0.1:' + $actualPort
+$baseUrl
+docker --context desktop-linux logs --timestamps $containerId
+```
+
+没有覆盖镜像的用户、工作目录或 CMD，也没有挂载项目。默认命令使用 `/opt/venv/bin/python -B -m uvicorn app.main:app`，在容器内监听 `0.0.0.0:8000`，仅一个 worker，不启用 reload。宿主机只发布到 `127.0.0.1`，空的宿主机端口部分由 Docker 动态分配；必须读取本次映射，不能固定使用历史端口。
+
+`EXPOSE 8000` 只是镜像中的端口声明，**不等于发布宿主机端口**；实际发布由 `--publish` 决定。容器 ID 也不是进程 PID，容器内 PID 与 Docker Linux VM、Windows 客户端的 PID 不能混用。
+
+### 请求健康接口
+
+端口已分配不代表应用已就绪。先在日志中确认 `Application startup complete` 和 Uvicorn 监听信息；手动等待应有上限，例如 45 秒，超时先保存日志再停止本批容器。下面使用普通 .NET HTTP 客户端，只请求宿主机动态端口，不加载浏览器或外部 CDN：
+
+```powershell
+Add-Type -AssemblyName System.Net.Http
+$handler = [System.Net.Http.HttpClientHandler]::new()
+$handler.UseProxy = $false
+$handler.AllowAutoRedirect = $false
+$client = [System.Net.Http.HttpClient]::new($handler)
+$client.Timeout = [TimeSpan]::FromSeconds(5)
+$response = $null
+try {
+    $response = $client.GetAsync("$baseUrl/health").GetAwaiter().GetResult()
+    $body = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult() | ConvertFrom-Json
+    if ([int]$response.StatusCode -ne 200 -or $body.status -ne 'ok') {
+        throw '健康接口响应不符合预期。'
+    }
+    $body
+} finally {
+    if ($null -ne $response) { $response.Dispose() }
+    $client.Dispose()
+}
+```
+
+客户端明确设置超时、绕过代理并禁止自动重定向。请求失败时也会关闭客户端；仍需执行下面的容器日志与停止清理步骤。示例没有调用两个 GitHub 业务接口。
+
+### 保存日志、停止并核对后删除
+
+把 `$dockerLogDir` 换为已准备好的本次专用可写目录。以下操作只针对前面记录的完整 `$containerId`，不要按名称前缀批量停止，也不执行全局 prune：
+
+```powershell
+$dockerLogDir = 'C:\path\to\new-docker-check-logs'  # 替换为本次日志目录
+
+docker --context desktop-linux logs --timestamps $containerId 2>&1 |
+    Tee-Object -FilePath (Join-Path $dockerLogDir 'service-before-stop.log')
+docker --context desktop-linux container inspect $containerId |
+    Set-Content -LiteralPath (Join-Path $dockerLogDir 'state-before-stop.json') -Encoding UTF8
+
+docker --context desktop-linux stop -t 10 $containerId
+$stopCommandExit = $LASTEXITCODE
+"docker stop 退出码：$stopCommandExit"
+
+$stoppedJson = docker --context desktop-linux container inspect $containerId
+if ($LASTEXITCODE -ne 0) { throw '无法读取停止状态，先保留容器并排查。' }
+$stoppedJson | Set-Content -LiteralPath (Join-Path $dockerLogDir 'state-after-stop.json') -Encoding UTF8
+$stopped = @($stoppedJson | ConvertFrom-Json)[0]
+$stopped.State | Format-List Running, Status, ExitCode, OOMKilled, StartedAt, FinishedAt
+docker --context desktop-linux logs --timestamps $containerId 2>&1 |
+    Tee-Object -FilePath (Join-Path $dockerLogDir 'service-after-stop.log')
+```
+
+分别核对 `docker stop` 命令退出码和 `State.ExitCode`，不能混为一谈，也不能只凭某个退出码断言正常关闭。确认 `Running=false`、`Status=exited`、没有 OOM，日志含 `Application shutdown complete` 和 `Finished server process`，并确认原宿主机端口不再提供该服务；必要时按此容器 ID 查询有时间边界的 Docker 事件，区分 SIGTERM 与 SIGKILL。若异常或日志缺失，保留记录并排查，不把强制清理写成正常停止通过。
+
+确认状态和日志后，再单独删除这个已停止的容器：
+
+```powershell
+if ($stopCommandExit -ne 0 -or $stopped.State.Running -or $stopped.State.Status -ne 'exited') {
+    throw '停止未确认，不执行删除。'
+}
+docker --context desktop-linux container rm $containerId
+if ($LASTEXITCODE -ne 0) { throw '本批容器删除失败，先检查实际状态。' }
+```
+
+保留本地镜像供后续使用，不删除其他容器、镜像、卷或构建缓存。以上是手动使用步骤，不是自动验收脚本的逐字重现；已经完成的构建、HTTP 与停止结果另列于“Day 8 本地 Docker 构建与容器 HTTP 验收记录”。
 
 ## 接口与审查规则
 
@@ -483,11 +618,11 @@ URL 和文件路径校验函数本身不进行 DNS 或 HTTP 请求；仓库或�
 - **规则只匹配语法结构。** 不追踪函数别名、变量绑定、跨文件关系或 `builtins.eval(...)`、`obj.print(...)` 等属性调用；自定义同名函数也可能被提示。
 - **不是完整的 Python 正确性检查。** `PY_SYNTAX` 表示 AST 解析失败，不代表能发现所有编译阶段或运行时错误。注释和普通字符串中的规则名称不会触发问题；字符串插值表达式中的真实调用仍会被遍历。
 - **提示需要结合上下文判断。** `print()` 有时是正常输出；`PY_PRINT` 只是提示，并不自动认定代码有缺陷。
-- **不提供完整安全分析或安全保证。** 当前规则不是完整的漏洞扫描，也没有沙箱执行或进程隔离。已有源码长度、远程文件字节和文件响应体大小限制，但不能替代完整的 CPU、内存、并发及总耗时资源隔离。
+- **不提供完整安全分析或安全保证。** 当前规则不是完整的漏洞扫描；不会在沙箱中执行源码，也不为每次审查请求启动独立进程。已有源码长度、远程文件字节和文件响应体大小限制，但不能替代完整的 CPU、内存、并发及总耗时资源隔离，提供 Docker 运行方式也不等于已有完整生产防护。
 - **GitHub 范围受限。** 只支持公开仓库元数据查询和默认分支单个 Python 文件读取审查；不读取 PR 或 diff，不支持私有仓库、Token、webhook 或自动发布评论；GitHub Actions 仅负责验证本项目。
 - **GitHub 客户端没有重试、缓存或认证。** 当前也没有调用方鉴权或应用级请求限流；文件读取有受限响应体和源码配额，元数据查询尚无相同的流式正文限制，不属于完整的生产环境防护。
 - **网络配置固定。** `trust_env=False`，不会自动采用环境代理或自定义证书变量；需要代理或企业证书的环境可能无法直接连接。2026-10-30 已完成最小应用实网验收，但期间也遇到匿名限流和连接超时，不保证所有网络环境或后续请求始终可用；其他机器访问和生产部署仍未验收。
-- **本机监听验收范围有限。** Day 7 第一批只通过 `127.0.0.1` 验证健康、文档及源码审查。OpenAPI 中存在两个 GitHub 路由不代表已调用它们；不能据此宣称所有 GitHub 路由的真实 HTTP 行为已验收。
+- **本机监听验收范围有限。** Day 7 Windows 原生进程与 Day 8 Docker 端口映射均只从宿主机 `127.0.0.1` 验证健康、文档及源码审查。OpenAPI 中存在两个 GitHub 路由不代表已调用它们；不能据此宣称所有 GitHub 路由的真实 HTTP 行为已验收，也不能推导其他机器一定不可访问。
 - **没有 AI 审查。** 不调用 LLM（大语言模型）或付费 AI API，不生成 AI 修复建议。
 - **没有产品前端、数据库或审查记录持久化。** `/docs` 是 FastAPI 提供的接口调试文档。
 
@@ -507,7 +642,7 @@ $reviewResult | ConvertTo-Json -Depth 5
 
 第一个请求应返回 `status: ok`；第二个应返回 `language: python`、`issue_count: 1` 和一条 `PY_PRINT` 提示。也可在 `/docs` 页面直接试用接口。
 
-上面的健康检查和源码提交接口不需要 GitHub 网络。访问 `/docs` 也不会自动查询 GitHub；在文档页面执行仓库元数据查询或文件审查接口会发出真实 GitHub 请求。本批文档同步未执行这些命令；Day 5 最小 GitHub 实网验收和 Day 7 本机 HTTP 验收的范围与结果分别见下文历史记录。
+上面的健康检查和源码提交接口不需要 GitHub 网络。访问 `/docs` 也不会自动查询 GitHub；在文档页面执行仓库元数据查询或文件审查接口会发出真实 GitHub 请求。本批文档同步未执行这些命令；Day 5 最小 GitHub 实网验收、Day 7 本机 HTTP 和 Day 8 容器 HTTP 验收的范围与结果分别见下文历史记录。
 
 ## 运行自动化测试
 
@@ -712,7 +847,7 @@ x64 根据实际 Python 发行包和安装的 x86_64 wheel 核实；该记录不
 
 ### Day 7 Windows 本机 HTTP 监听验收记录（第一批已完成）
 
-验收对象提交：`5fa9a40c1dd4f938a43737e892ebd637ff7f6663`。以下记录属于已完成的 Day 7 第一批；**本批第二批仅同步 README，没有重新运行安装、HTTP 验收或历史检查，也没有查询 CI。**
+验收对象提交：`5fa9a40c1dd4f938a43737e892ebd637ff7f6663`。以下记录属于已完成的 Day 7 第一批；**当时的 Day 7 第二批仅同步 README，没有重新运行安装、HTTP 验收或历史检查，也没有查询 CI。本批 Day 8 第三批同样未重跑该次验收。**
 
 实际环境为 **Windows AMD64 / CPython 3.14.6**，使用全新独立运行环境，未复用旧项目 `.venv`，未启用 system-site-packages。引导包 pip 固定为 **26.1.2**；从官方 PyPI 安装 Windows 运行锁，保持 TLS 校验，启用 `--require-hashes` 和 `--only-binary=:all:`。22 个运行包版本全部匹配锁文件，无开发依赖；`pip check` 通过，返回 `No broken requirements found.`。
 
@@ -739,6 +874,65 @@ x64 根据实际 Python 发行包和安装的 x86_64 wheel 核实；该记录不
 该次验收未发现 Python 或服务弃用警告；旧 `.venv` 历史退出 `103` 的原因仍未定位，未修复旧环境或修改其配置。项目 25 个文件的清单及 SHA-256 前后均未变，分支和提交不变，工作区干净、暂存区为空。
 
 **结论仅适用于上述 Windows 新运行环境的本机 HTTP 监听链路。** 该次没有调用两个 GitHub 业务接口或请求真实 GitHub，没有验证其他机器访问或执行生产部署；不扩大为所有 GitHub 路由的真实 HTTP 行为已验收。Day 5 的真实 GitHub 历史记录、Day 6 的离线检查和本次本机 TCP 验收分别保留；CI #5 仍绑定其原提交，不用来代表此文档或其他提交的 CI。
+
+### Day 8 本地 Docker 构建与容器 HTTP 验收记录（第一、第二批已完成）
+
+业务源码基线为 `62967b6a9df9051543f17196fe17cfac697c9e60`。**验收时 `backend/Dockerfile` 和 `backend/.dockerignore` 仍是未跟踪文件，尚未提交；不能声称上述提交已经包含这两个文件。** 下列为此前第一、第二批的实际结果，本批 Day 8 第三批只更新 README，没有重新构建、安装、启动容器、发送 HTTP 请求、运行其他测试或查询 CI。
+
+已验收的本地镜像完整 ID：
+
+```text
+sha256:bdaad6147494002f0e3e21c9a9c8a8794c08faaee4acd15a99c61213fc7bfff8
+```
+
+这是本机镜像标识，不是公共仓库镜像地址；没有发布或推送镜像。
+
+| 构建与镜像检查 | 已核实结果 |
+| --- | --- |
+| Docker Engine | `29.8.0`，使用 `desktop-linux` 引擎 |
+| 镜像目标 | Debian 12 / Linux AMD64 / glibc 2.36 / CPython 3.12.16 |
+| 基础镜像 | `python@sha256:e697c81897302a4c4333bade000d98038fbb21eb064f8ee1fd42d02ebcd9d337` |
+| 构建方式 | 以 `backend` 为上下文，显式 `linux/amd64`，buildx 使用 `--load --progress plain`，唯一的本地标签 |
+| 依赖 | `/opt/venv` 中 pip 26.1.2；23 个运行包逐项匹配 Linux 运行锁，无开发专用包或 pip-tools；`pip check` 退出 `0` |
+| 应用内容 | 6 个源码文件的集合及字节哈希与主机一致，`app.main` 来自 `/app/app/main.py` |
+| 运行配置 | 用户 `10001:10001`、工作目录 `/app`、声明 `8000/tcp`；JSON CMD 直接启动 Python/Uvicorn，单 worker、无 reload |
+| 构建上下文 | 实际上下文导出验证通过，包括临时嵌套包和禁止项测试，不仅依赖静态 glob 推断 |
+| 镜像内容检查 | 断网检查容器、不发布端口、无主机项目挂载；检查退出 `0`，容器已清理，成功镜像保留 |
+
+前两次构建在 pip wheel 正文下载阶段超时；只给 Dockerfile 两处 pip 安装命令增加 `--timeout 60 --retries 2` 后，复验批次仅实际构建一次并成功，退出码为 `0`。这不证明网络故障根因已定位或修复。
+
+非 root 用户执行 pip 检查时出现缓存目录 `/.cache/pip` 不可写警告，pip 自动禁用缓存，`pip check` 仍退出 `0`。该警告未被过滤，也未通过修改镜像、HOME 或新增可写目录消除；它与下列 HTTP 服务日志中未发现警告是不同记录。
+
+第二批成功验收日期为 **2026-11-02（北京时间）**。使用同一完整镜像 ID 启动独立容器，保持默认 CMD、用户和工作目录，无主机挂载，采用正常 bridge 网络，仅将 `8000/tcp` 动态发布到 Windows 宿主机 `127.0.0.1`。请求由 Windows 普通 **.NET HttpClient** 发往宿主机实际端口，设置明确超时、禁用代理和自动重定向；未用 `TestClient`、`ASGITransport`、`MockTransport` 或依赖覆盖替代端口映射链路。
+
+| 真实 HTTP 场景 | 状态码 | 明确断言结果 |
+| --- | --- | --- |
+| 初始 `GET /health` | `200` | JSON 为 `{"status":"ok"}` |
+| `GET /docs` | `200` | Swagger UI HTML；未打开浏览器或加载外部 CDN |
+| `GET /openapi.json` | `200` | 四个业务路由及方法正确，健康接口为 GET，其余三个为 POST |
+| 提交 `x = 1` | `200` | `language: python`、零问题、`issues: []` |
+| 提交 `print('day8')` | `200` | 恰好一个 `PY_PRINT`，`severity: info`，`line: 1` |
+| 提交 `def broken(:` | `200` | 恰好一个 `PY_SYNTAX`，`severity: error` |
+| 提交空字符串 | `422` | `detail` 为验证错误数组 |
+| 提交含 `raise RuntimeError('must not execute')` 的源码 | `200` | 零问题；源码只作为字符串静态分析，没有执行 |
+| 最后再次 `GET /health` | `200` | 服务仍正常 |
+
+九项响应均通过断言。启动等待的前两次健康探测发生请求异常，第三次成功，不能写成首次探测即成功；该次服务日志未发现警告。没有调用两个 GitHub 业务接口，也没有访问真实 GitHub。
+
+客户端在 `finally` 中关闭，随后保存服务日志并执行停止、状态采集和删除：
+
+| 停止与清理项目 | 实际结果 |
+| --- | --- |
+| `docker stop -t 10` | 命令退出码 `0`，耗时 `1.27` 秒 |
+| 容器最终状态 | `Running=false`、`Status=exited`、`State.ExitCode=0`、`OOMKilled=false` |
+| 信号事件 | SIGTERM（15），未出现 SIGKILL |
+| 关闭日志 | 包含 `Application shutdown complete` 和 `Finished server process` |
+| 原宿主机端口 | 停止后拒绝连接，不再提供该服务 |
+| 资源收尾 | 容器普通删除、镜像保留，没有强制清理，也未操作其他 Docker 资源 |
+
+正常停止结论结合日志、事件、状态和端口结果，不仅依据退出码。成功批次重新建立了可跨工具调用读回的起始快照，27 个项目文件的路径集合、大小和 SHA-256 前后全部一致；这份比较不补证此前丢失起始快照的那一轮。
+
+**结论仅覆盖本次 Windows 宿主机经 Docker Desktop 访问该 Linux 容器的本机 HTTP 链路。** 不扩大为 GitHub 业务实网、其他机器访问限制或生产部署验收，也不证明其他机器必然无法访问。现有 Backend CI 尚无 Docker 构建或容器 HTTP 步骤，旧 CI 成功不代表 Docker 已通过远程 CI。本批仅同步上述记录，没有重跑验收。
 
 ## Ruff 代码质量检查与格式检查
 
@@ -789,6 +983,8 @@ set -euo pipefail
 
 任务仅申请 `permissions: contents: read`，无需手动配置密钥。没有增加矩阵、容器 job、缓存、部署或发布；任意安装、哈希校验或检查失败都会使 job 失败，未设置忽略失败。覆盖率仍只测量行覆盖率，没有最低覆盖率门槛。
 
+**当前工作流只执行 Python 依赖及质量检查，尚无 Docker 构建或容器 HTTP 步骤。** Day 8 的构建与容器链路是本地验收记录，不能把此前任何 Backend CI 成功扩写为 Docker 已通过远程 CI；本批没有修改 CI 或重新查询远程。
+
 **此前 Day 4 远程验收记录：** 提交 `d584a95d48281ec19fa3429f90378366f2081c88` 已推送，Backend CI 成功，见[历史运行记录](https://github.com/tiezhi7/RepoPilot/actions/runs/40859087524)。该链接只代表 Day 4；Day 5 的成功运行是上文另列的 Backend CI #4。**本批文档同步未访问或重新查询这些运行。** CI 成功本身不能替代应用实网验收，后者按上文记录的场景单独完成。
 
 Day 4、Day 5 和 Day 6 的远程结果分别绑定各自历史提交。Day 6 的依赖声明、四份锁、CI 和文档调整对应提交 `2b0a4d9403d7831e04123c12181b6719eea75c79`，已推送并通过 Backend CI #5 的 Ubuntu 开发环境验证。Day 7 本机 HTTP 记录另绑定 `5fa9a40c1dd4f938a43737e892ebd637ff7f6663`。本批 README 同步属于此后的独立文档改动，不改变历史运行的 `head_sha`，也不把已有 CI 成功结论自动延伸到其他提交。
@@ -797,13 +993,14 @@ Day 4、Day 5 和 Day 6 的远程结果分别绑定各自历史提交。Day 6 �
 
 ## 下一阶段计划（尚未实施）
 
-Day 5 的提交推送、远程 CI 和最小应用实网验收已有历史记录；Day 6 已完成依赖分离、四份锁、Windows / Debian 全新环境验收、完整差异审查、本地提交、推送及 Backend CI #5 的 Ubuntu 开发环境验收。Day 7 第一批已在全新 Windows 运行环境完成本机 HTTP 监听验收，第二批仅同步 README，后续工作按独立范围进行：
+Day 5 的提交推送、远程 CI 和最小应用实网验收已有历史记录；Day 6 已完成依赖分离、四份锁、Windows / Debian 全新环境验收、完整差异审查、本地提交、推送及 Backend CI #5 的 Ubuntu 开发环境验收。Day 7 Windows 本机 HTTP 和 Day 8 Docker 构建、镜像内容与容器 HTTP 验收均已完成；本批第三批仅同步 README，后续按独立范围进行：
 
-1. 经单独授权审阅、提交并推送本次 README 同步改动，保留各历史验收记录对应的完整 SHA；本批不执行提交或推送。
-2. 如需验证 Ubuntu 纯运行环境，另建干净环境仅安装 Linux 运行锁并独立验收，不能以现有 39 包开发环境代替。
-3. 单独安排新依赖环境中的 GitHub 应用实网验收；如需覆盖经监听服务调用两个 GitHub 业务接口的行为，也应独立验收。Day 5 最小实网记录不改写，Day 7 本机验收未执行这些调用。
-4. 如需验证其他机器访问，先单独确定访问范围再验收，不能由已完成的 Windows `127.0.0.1` 监听结果推导。
-5. 单独安排生产部署验收，不从离线 CI、进程内测试或本机 HTTP 结果推导部署通过。
+1. 完整审查 Dockerfile、.dockerignore 和 README 累计差异；经单独授权再暂存、提交及推送，并核对对应新提交的 CI。保留本次验收时 Docker 配置未提交的事实，不改写历史基线；本批不执行 Git 写操作。
+2. 如需把 Docker 构建和容器 HTTP 纳入 CI，另行设计并验证对应步骤，现有 Python 检查不能代替。
+3. 如需验证 Ubuntu 纯运行环境，另建干净环境仅安装 Linux 运行锁并独立验收，不能以现有 39 包开发环境代替。
+4. 单独安排新依赖环境中的 GitHub 应用实网验收；经原生监听服务或容器映射调用两个 GitHub 业务接口也需单独验收。Day 5 最小实网记录不改写，Day 7、Day 8 本机 HTTP 验收未执行这些调用。
+5. 如需验证其他机器访问或访问限制，先单独确定范围再验收，不能由已完成的本机 `127.0.0.1` 结果推导。
+6. 单独安排生产部署验收，不从离线 CI、进程内测试或本机 HTTP 结果推导部署通过。
 
 应用级限流、缓存和覆盖率门槛也需要后续单独评估；本批未添加。
 
