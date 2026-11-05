@@ -4,9 +4,9 @@ RepoPilot 当前是一个基于 FastAPI 的 Python 后端，支持健康检查�
 
 项目的长期目标是发展为面向 GitHub 的 AI 代码审查助手。当前尚未接入 AI；调用文件审查接口时，只读取默认分支中指定的一个受限 Python 文件，不扫描整个仓库。源码只作为 AST 分析的数据，不执行、导入或保存。
 
-仓库已提供 GitHub Actions 持续集成配置。此前已核实：Day 5 提交已推送，Backend CI #4 成功，并在 2026-10-30 完成最小应用实网验收，详见下文历史记录。Day 6 已分离依赖声明、生成四份平台锁、完成 Windows 与 Debian Linux 全新环境验收，相关变更已提交并推送，Ubuntu 开发环境的 Backend CI #5 也已成功。Day 7 第一批在全新 Windows 运行环境中完成本机 HTTP 监听验收；Day 8 第一、第二批进一步完成 Docker 本地构建和容器端口映射链路验收，均覆盖健康检查、文档和源码审查。
+仓库已提供 GitHub Actions 持续集成配置。此前已核实：Day 5 提交已推送，Backend CI #4 成功，并在 2026-10-30 完成最小应用实网验收，详见下文历史记录。Day 6 已分离依赖声明、生成四份平台锁、完成 Windows 与 Debian Linux 全新环境验收，相关变更已提交并推送，Ubuntu 开发环境的 Backend CI #5 也已成功。Day 7 第一批在全新 Windows 运行环境中完成本机 HTTP 监听验收；Day 8 第一、第二批进一步完成 Docker 本地构建和容器端口映射链路验收，均覆盖健康检查、文档和源码审查。Day 9 当前工作区新增独立的 Docker checks job，并提供仅用标准库、通过宿主机真实端口检查九项 HTTP 行为的脚本，保留原有 Backend checks。
 
-**本批 Day 8 第三批仅更新 README，没有重新执行构建、安装、容器启动、HTTP 验收、其他测试或 CI 查询。** 各次验收分别绑定下文的业务源码基线、配置与环境；当前 CI 不包含 Docker 检查。本机监听及容器结果不代表两个 GitHub 业务接口的真实 HTTP 行为、其他机器访问限制或生产部署已验收。
+**本批 Day 9 第三批仅更新 README，没有重新执行构建、安装、容器启动、HTTP 验收、其他测试、端口补查或 CI 查询。** Day 9 工作流和冒烟脚本尚未提交或推送，远程 Docker CI 尚未验证。本地结果基于 `f292fb33ea509d5104b9f64a38feadc9511cedbc` 加未提交的工作流及未跟踪脚本，不能声称该提交已包含 Day 9 改动。各次验收分别绑定下文的业务源码基线、配置与环境；本机监听及容器结果不代表两个 GitHub 业务接口的真实 HTTP 行为、其他机器访问限制或生产部署已验收。
 
 ## 已实现功能
 
@@ -76,7 +76,16 @@ RepoPilot 当前是一个基于 FastAPI 的 Python 后端，支持健康检查�
 - 镜像使用 `/opt/venv`、非 root 用户 `10001:10001` 和复制进镜像的应用源码，不含开发专用依赖；主机代码修改后需重新构建。
 - 第一批完成实际构建上下文、镜像内容及依赖检查；保留下载超时、最小参数调整和非 root pip 缓存警告记录。
 - 第二批通过 Windows 宿主机动态端口完成九项真实容器 HTTP 断言，验证日志、SIGTERM 停止、状态、端口释放和本批容器删除。
-- 第三批仅同步 README，未重跑构建或验收。验收时两个 Docker 配置尚未提交；当前 CI 仍只检查 Python 依赖与代码质量，没有 Docker 构建或容器 HTTP 步骤。
+- 第三批当时仅同步 README，未重跑构建或验收。验收时两个 Docker 配置尚未提交，当时的 CI 只检查 Python 依赖与代码质量，没有 Docker 构建或容器 HTTP 步骤；两个配置后来随 Day 8 提交纳入仓库。
+
+### Day 9：Docker CI 配置与本地流程验收（尚未提交）
+
+- 当前工作区的 `.github/workflows/backend-ci.yml` 保留原 Backend checks，新增独立 Docker checks；两个 job 没有 `needs` 依赖。
+- 新增 `backend/scripts/smoke_http.py`，仅用 Python 标准库请求固定的 `127.0.0.1` 端口，验证九项 HTTP 行为；不导入应用或使用模拟传输，不调用 GitHub 业务接口。
+- Docker job 从 `backend` 构建，按实际镜像 ID 启动默认服务，核对容器归属、配置及动态端口，再运行冒烟脚本；由有时限的 `always()` 步骤收集日志、停止和普通删除本批容器。
+- 已有本地记录包括一次缓存构建、Entrypoint 键缺失失败及单行修复、九项真实 HTTP 检查、退出码 23 的普通失败收尾，以及 HTTP 500 反例。
+- 原反例收尾的端口探测超时，验收器最终退出 1；后续独立补查仅确认补查时无监听，不改写原退出码或推断超时原因。详细顺序和结果见下文 Day 9 记录。
+- 工作流和脚本尚未提交、推送；Ubuntu 24.04 / 宿主机 Python 3.12.16 x64 的远程 Docker job 尚未执行验证。本批只整理文档。
 
 以上为已有功能、配置与已完成的验收；后面的“下一阶段计划”尚未实施。
 
@@ -108,6 +117,8 @@ RepoPilot/
     │   ├── github_client.py
     │   ├── reviewer.py
     │   └── rules.py
+    ├── scripts/
+    │   └── smoke_http.py
     └── tests/
         ├── test_api.py
         ├── test_github_schemas.py
@@ -122,7 +133,7 @@ RepoPilot/
 - `AGENTS.md`：记录项目范围和编程协作规则。
 - `.gitignore`：告诉 Git 哪些文件不需要纳入版本管理。
 - `README.md`：介绍项目、目录结构及使用方式。
-- `.github/workflows/backend-ci.yml`：定义 GitHub Actions 后端检查任务。
+- `.github/workflows/backend-ci.yml`：定义 GitHub Actions 检查任务；当前工作区保留 Backend checks，并新增独立 Docker checks，后者尚未远程验证。
 - `backend/Dockerfile`：定义固定 Linux 基础镜像、严格运行锁安装、非 root 用户和默认 Uvicorn 启动命令。
 - `backend/.dockerignore`：以允许列表限制 `backend` 构建上下文，排除虚拟环境、测试、缓存及其他无关输入。
 - `backend/requirements.txt`：维护 FastAPI、Uvicorn 和 HTTPX 三项运行直接依赖的版本范围，是生成运行锁的输入。
@@ -136,6 +147,7 @@ RepoPilot/
 - `backend/app/github_client.py`：GitHub 同步 HTTP 客户端、元数据七字段映射、受限文件读取与解码、客户端异常及连接生命周期管理。
 - `backend/app/reviewer.py`：解析源码、处理解析异常、调用规则收集器，并对结果排序。
 - `backend/app/rules.py`：三个独立节点规则及只遍历一次 AST 的收集器。
+- `backend/scripts/smoke_http.py`：仅用标准库从宿主机请求本机监听端口，等待就绪并检查九项 HTTP 行为；通过显式条件和异常报告失败，不依赖可被 `python -O` 禁用的 `assert`。
 - `backend/tests/test_api.py`：验证接口、审查规则、输入边界及源码不被执行。
 - `backend/tests/test_github_schemas.py`：验证仓库 URL 安全规则及请求、响应模型。
 - `backend/tests/test_github_client.py`：使用模拟响应验证请求目标、超时配置、上游错误、数据校验及连接关闭。
@@ -622,7 +634,8 @@ URL 和文件路径校验函数本身不进行 DNS 或 HTTP 请求；仓库或�
 - **GitHub 范围受限。** 只支持公开仓库元数据查询和默认分支单个 Python 文件读取审查；不读取 PR 或 diff，不支持私有仓库、Token、webhook 或自动发布评论；GitHub Actions 仅负责验证本项目。
 - **GitHub 客户端没有重试、缓存或认证。** 当前也没有调用方鉴权或应用级请求限流；文件读取有受限响应体和源码配额，元数据查询尚无相同的流式正文限制，不属于完整的生产环境防护。
 - **网络配置固定。** `trust_env=False`，不会自动采用环境代理或自定义证书变量；需要代理或企业证书的环境可能无法直接连接。2026-10-30 已完成最小应用实网验收，但期间也遇到匿名限流和连接超时，不保证所有网络环境或后续请求始终可用；其他机器访问和生产部署仍未验收。
-- **本机监听验收范围有限。** Day 7 Windows 原生进程与 Day 8 Docker 端口映射均只从宿主机 `127.0.0.1` 验证健康、文档及源码审查。OpenAPI 中存在两个 GitHub 路由不代表已调用它们；不能据此宣称所有 GitHub 路由的真实 HTTP 行为已验收，也不能推导其他机器一定不可访问。
+- **本机监听验收范围有限。** Day 7 Windows 原生进程、Day 8 Docker 端口映射及 Day 9 本地容器成功路径，均只从宿主机 `127.0.0.1` 验证健康、文档及源码审查。OpenAPI 中存在两个 GitHub 路由不代表已调用它们；不能据此宣称所有 GitHub 路由的真实 HTTP 行为已验收，也不能推导其他机器一定不可访问。
+- **Day 9 Docker CI 尚未远程验证。** 当前工作区已有独立 Docker job，本地验收记录不能替代 Ubuntu / Python 3.12 runner 的实际执行；原反例收尾超时与后续端口补查分别保留，不能将原验收器退出码 1 改写为 0。镜像没有发布，也未完成生产部署验收。
 - **没有 AI 审查。** 不调用 LLM（大语言模型）或付费 AI API，不生成 AI 修复建议。
 - **没有产品前端、数据库或审查记录持久化。** `/docs` 是 FastAPI 提供的接口调试文档。
 
@@ -664,6 +677,8 @@ Day 5 的三个文件测试模块进一步覆盖相对 Python 路径、严格模
 
 测试阻断真实网络；依赖覆盖在结束时恢复。资源测试既检查模拟依赖，也通过替换构造器的传输层执行真实的生产依赖，验证每次请求独立创建并关闭客户端。这些测试不验证真实 GitHub 数据、DNS、TLS 握手或实际服务延迟。
 
+以上描述的是 pytest 测试套件。Day 9 的 `scripts/smoke_http.py` 是单独的真实 HTTP 冒烟脚本，需要已启动的本机服务和实际端口；它不使用 TestClient 或 MockTransport，也不访问 GitHub。其构建、HTTP 检查和收尾流程见下文 CI 配置与本地记录，本批未运行该脚本。
+
 新增的解析器异常测试使用 `monkeypatch` 临时模拟失败，避免使用可能耗尽资源的输入来触发异常；这不等于验证了真实资源耗尽场景。
 
 ## 在本地运行全部质量检查
@@ -688,7 +703,7 @@ Linux：
 .venv/bin/python -m pytest --cov=app --cov-report=term-missing -q
 ```
 
-这与本次 CI 配置的检查内容和顺序一致：先独立执行 `pip check` 检查依赖冲突，再执行原四项检查。CI 使用 setup-python 选出的解释器创建 `.venv`，之后安装和检查均显式使用 `.venv/bin/python`，不依赖跨步骤激活。每条命令都应成功，不能只根据最后一条的结果判断所有检查通过。
+这与 CI 中 Backend checks job 的检查内容和顺序一致：先独立执行 `pip check` 检查依赖冲突，再执行原四项检查。该 job 使用 setup-python 选出的解释器创建 `.venv`，之后安装和检查均显式使用 `.venv/bin/python`，不依赖跨步骤激活。Docker checks 是另一独立 job，不安装项目开发依赖。每条命令都应成功，不能只根据最后一条的结果判断所有检查通过。
 
 如需确认没有弃用警告等问题，可将警告视为错误运行同一套测试：
 
@@ -847,7 +862,7 @@ x64 根据实际 Python 发行包和安装的 x86_64 wheel 核实；该记录不
 
 ### Day 7 Windows 本机 HTTP 监听验收记录（第一批已完成）
 
-验收对象提交：`5fa9a40c1dd4f938a43737e892ebd637ff7f6663`。以下记录属于已完成的 Day 7 第一批；**当时的 Day 7 第二批仅同步 README，没有重新运行安装、HTTP 验收或历史检查，也没有查询 CI。本批 Day 8 第三批同样未重跑该次验收。**
+验收对象提交：`5fa9a40c1dd4f938a43737e892ebd637ff7f6663`。以下记录属于已完成的 Day 7 第一批；**当时的 Day 7 第二批仅同步 README，没有重新运行安装、HTTP 验收或历史检查，也没有查询 CI。Day 8 第三批及本批 Day 9 文档同步同样未重跑该次验收。**
 
 实际环境为 **Windows AMD64 / CPython 3.14.6**，使用全新独立运行环境，未复用旧项目 `.venv`，未启用 system-site-packages。引导包 pip 固定为 **26.1.2**；从官方 PyPI 安装 Windows 运行锁，保持 TLS 校验，启用 `--require-hashes` 和 `--only-binary=:all:`。22 个运行包版本全部匹配锁文件，无开发依赖；`pip check` 通过，返回 `No broken requirements found.`。
 
@@ -877,7 +892,7 @@ x64 根据实际 Python 发行包和安装的 x86_64 wheel 核实；该记录不
 
 ### Day 8 本地 Docker 构建与容器 HTTP 验收记录（第一、第二批已完成）
 
-业务源码基线为 `62967b6a9df9051543f17196fe17cfac697c9e60`。**验收时 `backend/Dockerfile` 和 `backend/.dockerignore` 仍是未跟踪文件，尚未提交；不能声称上述提交已经包含这两个文件。** 下列为此前第一、第二批的实际结果，本批 Day 8 第三批只更新 README，没有重新构建、安装、启动容器、发送 HTTP 请求、运行其他测试或查询 CI。
+业务源码基线为 `62967b6a9df9051543f17196fe17cfac697c9e60`。**验收时 `backend/Dockerfile` 和 `backend/.dockerignore` 仍是未跟踪文件，尚未提交；不能声称上述提交已经包含这两个文件。** 下列为此前第一、第二批的实际结果，Day 8 第三批当时只更新 README，没有重新构建、安装、启动容器、发送 HTTP 请求、运行其他测试或查询 CI；本批 Day 9 文档同步也未重跑这些验收。
 
 已验收的本地镜像完整 ID：
 
@@ -932,7 +947,67 @@ sha256:bdaad6147494002f0e3e21c9a9c8a8794c08faaee4acd15a99c61213fc7bfff8
 
 正常停止结论结合日志、事件、状态和端口结果，不仅依据退出码。成功批次重新建立了可跨工具调用读回的起始快照，27 个项目文件的路径集合、大小和 SHA-256 前后全部一致；这份比较不补证此前丢失起始快照的那一轮。
 
-**结论仅覆盖本次 Windows 宿主机经 Docker Desktop 访问该 Linux 容器的本机 HTTP 链路。** 不扩大为 GitHub 业务实网、其他机器访问限制或生产部署验收，也不证明其他机器必然无法访问。现有 Backend CI 尚无 Docker 构建或容器 HTTP 步骤，旧 CI 成功不代表 Docker 已通过远程 CI。本批仅同步上述记录，没有重跑验收。
+**结论仅覆盖该次 Windows 宿主机经 Docker Desktop 访问该 Linux 容器的本机 HTTP 链路。** 不扩大为 GitHub 业务实网、其他机器访问限制或生产部署验收，也不证明其他机器必然无法访问。Day 8 当时的 Backend CI 尚无 Docker 构建或容器 HTTP 步骤，旧 CI 成功不代表 Docker 已通过远程 CI。Day 9 当前工作区已增加相关配置，但尚未远程验证；本批只同步文档，没有重跑验收。
+
+### Day 9 Docker CI 本地流程验收记录（2026-11-05，尚未提交）
+
+业务源码基线为 `f292fb33ea509d5104b9f64a38feadc9511cedbc`，验收另外使用了**未提交的工作流和未跟踪的 `backend/scripts/smoke_http.py`**。该 SHA 不包含 Day 9 改动。以下是已有本地记录，本批第三批没有重新构建、启动容器、发送 HTTP、执行端口补查或查询 CI，也没有修改原日志或 JSON。
+
+| 环境 | 本地实际记录 |
+| --- | --- |
+| 宿主机 | Windows AMD64 / CPython 3.14.6，执行标准库 HTTP 脚本 |
+| Docker CLI / Engine | 29.8.0，使用 `desktop-linux` 引擎 |
+| buildx / Bash | 0.37.0 / 5.3.15 |
+| 容器目标 | Debian 12 / Linux AMD64 / CPython 3.12.16，与宿主机脚本解释器分开记录 |
+| 远程 Docker job 目标 | Ubuntu 24.04 / 宿主机 Python 3.12.16 x64，仅已配置，尚未远程验证 |
+
+该次本地镜像 ID（没有发布到镜像仓库）：
+
+```text
+sha256:96e8218791aad66d6998c7c51e52de394d87c26387ffd19e8e81254a19806af1
+```
+
+构建与修复按实际顺序记录：
+
+1. 首次实际构建一次成功，退出 `0`，耗时 **103.742 秒**；安装及源码层命中缓存，不是全新依赖安装验收。
+2. 随后的配置核对因镜像 `Config` 缺少 `Entrypoint` 键而触发 `KeyError`，启动核对步骤退出 `1`。原清理正文退出 `0`，该容器已普通删除，流程仍保留退出 `1`；这不是退出码 23 场景的记录。
+3. 只将工作流中两侧 Entrypoint 访问改为 `config.get("Entrypoint") == image["Config"].get("Entrypoint")`。实际旧数据复现 `KeyError`，新表达式正确匹配，也拒绝不同的非空 Entrypoint；相对该修复批前副本恰好只有这一行变化。YAML、3 段内嵌 Python 和 5 段 Bash 语法检查通过。
+4. 后续复用同一完整镜像 ID，新增构建次数为 **0**。Dockerfile、.dockerignore、Linux 运行锁和六个应用源码文件均与该次构建记录一致。
+
+修复后重新从当前工作流提取启动、HTTP 和清理正文；Windows 路径与子进程环境作适配，原 Bash 正文保持不变。临时验收器在 `finally` 中调用原清理正文，没有仅依赖 GitHub 的 `always()` 表达式。
+
+成功路径使用 Windows 宿主机普通标准库 HTTP 客户端，经 `127.0.0.1:51907` 的实际 Docker 端口映射访问服务，未使用 TestClient、ASGITransport、MockTransport、依赖覆盖或容器内部请求替代链路：
+
+| 九项真实 HTTP 场景 | 状态码 | 已验证结果 |
+| --- | --- | --- |
+| 初始 `GET /health` | `200` | JSON 恰好为 `{"status":"ok"}` |
+| `GET /docs` | `200` | Swagger UI HTML，未加载外部 CDN |
+| `GET /openapi.json` | `200` | 四个业务路由和方法正确 |
+| 提交 `x = 1` | `200` | `language: python`、`issue_count: 0`、`issues: []` |
+| 提交 `print('day9')` | `200` | 恰好一个 `PY_PRINT`，`info`、第 1 行，数量与列表一致 |
+| 提交 `def broken(:` | `200` | 恰好一个 `PY_SYNTAX`，`error`、有效行号，数量与列表一致 |
+| 提交空 `code` | `422` | 非空验证错误数组，指向 `code` 字段 |
+| 提交顶层 `raise RuntimeError("DAY9_MUST_NOT_EXECUTE")` 的源码 | `200` | 零问题，源码只作为 JSON 字符串提交和静态分析，未执行 |
+| 最后再次 `GET /health` | `200` | JSON 正确，服务仍正常 |
+
+该路径九项检查全部通过，冒烟脚本退出 `0`。上述端口是历史动态分配结果，不能当作后续固定端口。没有调用两个 GitHub 业务接口或访问真实 GitHub。
+
+普通失败场景另启本批容器，经宿主机端口 `51155` 确认健康接口就绪后，注入步骤退出 `23`。两条容器流程分别保留结果：
+
+| 流程 | 原始步骤结果 | 原清理正文退出码 | 流程最终结果 |
+| --- | --- | --- | --- |
+| 九项 HTTP 成功路径 | 启动核对 `0`，冒烟脚本 `0` | `0` | `0` |
+| 普通失败后的清理 | 启动核对 `0`，健康就绪；注入步骤 `23` | `0` | **`23`** |
+
+这两个容器均以 `docker stop -t 10` 正常停止；删除前状态为 `Running=false`、`Status=exited`、`State.ExitCode=0`、`OOMKilled=false`，日志均包含 `Application shutdown complete` 和 `Finished server process`。两个容器随后普通删除并确认不存在，镜像保留，没有强制清理或操作其他 Docker 资源。清理成功没有将原始失败结果改成成功；该场景只验证普通步骤失败，不证明 GitHub 取消、runner 崩溃或强制中断时必定收尾。
+
+另用独立临时标准库服务验证 **HTTP 500 反例**，与真实容器成功结果分开记录：`/health` 返回正确的 `200` 和 JSON，`/docs` 故意返回 `500`。未经修改的冒烟脚本在文档检查处退出 **`1`**，只请求了 `/health`、`/docs`，没有输出“全部九项真实 HTTP 检查”通过。服务线程结束后，端口 `49247` 的原连接探测超时，释放状态当时未核实，因此**当批验收器最终退出 `1`**；该结果和原日志、JSON 均保留，没有写成整批全部通过。
+
+**后续独立端口补查：** 根据本会话已核实记录，北京时间 **2026-11-05 22:19:45**，经正常审批执行 `Get-NetTCPConnection`，查询退出 `0`；端口 `49247` 的连接记录为空，监听数量为 `0`。这只证明补查时无监听，不追溯证明原探测时的状态，也不将原批次退出码改为 `0`；原超时原因仍未确定。补查来源是会话工具记录，不声称另有磁盘日志文件，本批未重新补查。
+
+修复批的修改前、修复后及验收后快照均已独立读回：相对修改前只变更工作流这一行，其余 27 个文件未变；修复后至验收结束，28 个文件的清单、大小及 SHA-256 全部一致。该比较只适用于对应批次，不替代其他批次的起始记录。
+
+**范围与状态：** 本地成功路径和普通失败收尾已有上述证据；HTTP 500 被拒绝、原端口探测超时和后续无监听分别保留。Day 9 工作流和脚本尚未提交或推送，Ubuntu / Python 3.12 的远程 Docker CI 尚未验证；镜像发布、GitHub 业务接口实网、其他机器访问和生产部署均不属于本次通过范围。Day 5 的应用实网历史结果仍单独保留，不能用本机冒烟替代。
 
 ## Ruff 代码质量检查与格式检查
 
@@ -959,9 +1034,9 @@ sha256:bdaad6147494002f0e3e21c9a9c8a8794c08faaee4acd15a99c61213fc7bfff8
 - `push`：提交被推送到仓库时触发。
 - `pull_request`：由工作流监听的 Pull Request 事件触发。
 
-当前未设置分支或路径过滤，保留 `backend` job（显示名称 **Backend checks**）和只读权限。工作流固定 `runs-on: ubuntu-24.04`，使用原有 `actions/checkout@v7` 和 `actions/setup-python@v7`；checkout 配置 `persist-credentials: false`，setup-python 指定 `python-version: "3.12.16"`、`architecture: "x64"`。
+当前工作区未设置分支或路径过滤，保留 `backend` job（显示名称 **Backend checks**），新增 `docker` job（显示名称 **Docker checks**）。两个 job 不设置 `needs` 依赖，各自独立执行。工作流保持只读权限；两个 job 均使用 `runs-on: ubuntu-24.04`、原有 `actions/checkout@v7` 和 `actions/setup-python@v7`，checkout 配置 `persist-credentials: false`，setup-python 指定 `python-version: "3.12.16"`、`architecture: "x64"`。
 
-所有 `run` 步骤的工作目录仍为 `backend`。先使用 setup-python 提供的 `python` 创建新虚拟环境；随后均显式使用 `.venv/bin/python`：
+Backend checks 的全部 `run` 步骤工作目录仍为 `backend`，原行为与检查参数不变。先使用 setup-python 提供的 `python` 创建新虚拟环境；随后均显式使用 `.venv/bin/python`：
 
 ```bash
 python -m venv .venv
@@ -981,22 +1056,42 @@ set -euo pipefail
 
 上面按执行顺序展示命令；工作流将创建环境、固定 pip 和输出版本、安装开发锁、`pip check`、四项质量检查分为独立步骤。`pip check` 检查已安装包之间的依赖关系，不替代应用测试。项目依赖不再从范围声明安装，CI 不安装 pip-tools，也不重新生成锁文件。
 
-任务仅申请 `permissions: contents: read`，无需手动配置密钥。没有增加矩阵、容器 job、缓存、部署或发布；任意安装、哈希校验或检查失败都会使 job 失败，未设置忽略失败。覆盖率仍只测量行覆盖率，没有最低覆盖率门槛。
+工作流仅申请 `permissions: contents: read`，无需手动配置密钥。没有增加矩阵、缓存、部署或发布；任意安装、哈希校验或检查失败都会使对应 job 失败，未设置忽略失败。Backend checks 的覆盖率仍只测量行覆盖率，没有最低覆盖率门槛。
 
-**当前工作流只执行 Python 依赖及质量检查，尚无 Docker 构建或容器 HTTP 步骤。** Day 8 的构建与容器链路是本地验收记录，不能把此前任何 Backend CI 成功扩写为 Docker 已通过远程 CI；本批没有修改 CI 或重新查询远程。
+### Docker checks：当前工作区配置，尚未远程验证
+
+Docker job 总时限为 **20 分钟**，显式设置 Bash 和默认工作目录 `backend`，不依赖另一个 job 的 defaults。该 job 的宿主机 Python 目标为 **3.12.16 x64**，HTTP 脚本只用标准库，不在宿主机安装项目开发依赖；镜像内 Python 和依赖由 Dockerfile 与 Linux 运行锁决定。
+
+| 步骤 | 当前配置 |
+| --- | --- |
+| 工具版本 | 输出 Docker、buildx 和宿主机 Python 版本 |
+| 构建 | 在 `backend` 使用 Dockerfile 和当前目录上下文，执行 `docker buildx build --platform linux/amd64 --load --progress plain`；使用本次运行的唯一标签和 `--iidfile`，构建步骤时限 15 分钟 |
+| 镜像身份 | 从构建 IID 核实实际本地镜像 ID，保存于 `RUNNER_TEMP` 的本次状态目录；按该 ID 启动，不使用历史镜像 ID |
+| 容器启动 | `--pull=never`、唯一名称及 `io.repopilot.ci-owner` 归属标签、`--cidfile`、bridge 网络，仅动态发布 `127.0.0.1::8000/tcp`；保留默认 CMD、用户和工作目录，无挂载，不使用 `--rm` |
+| 配置核对 | 检查完整 ID、名称、归属标签、镜像 ID、用户 `10001:10001`、工作目录 `/app`、默认 CMD/Entrypoint、无挂载及唯一端口映射，从实际 inspect 读取并校验宿主机端口 |
+| HTTP 冒烟 | 在 `backend` 执行 `python -B scripts/smoke_http.py --port <实际宿主机端口>`；步骤时限 2 分钟，不请求 GitHub 业务接口 |
+| 日志与清理 | 独立 `if: always()` 步骤，时限 3 分钟，工作目录改为 `${{ runner.temp }}`，不依赖源码目录存在；核对本次容器归属，收集停止前后日志，执行 `docker stop -t 10`，读取停止状态后普通删除本批已停止容器 |
+
+冒烟脚本只允许端口 `1–65535`，目标主机固定为 `127.0.0.1`；使用 `http.client` 建立真实 HTTP 连接，不使用环境代理或自动跟随重定向，连接在成功或异常时关闭。连接和读写操作设置最长 5 秒超时，就绪探测按剩余期限收紧，就绪等待最多 45 秒；仅就绪探测有限重试，业务响应不符合预期立即非零退出，逐项输出检查名称、状态码和结果。
+
+正常停止要求 `Running=false`、`Status=exited`、`ExitCode=0`、`OOMKilled=false`，并核对 `Application shutdown complete` 和 `Finished server process` 日志。清理按唯一名称、归属标签和完整 ID 确认本次容器，未创建容器时明确输出无需清理；仅在确认已停止后普通删除，不强制删除、不清理其他资源。普通步骤失败时仍收尾，清理成功不会覆盖原失败结果，停止、状态或清理异常也会保留失败结论；**runner 被强制终止时不能保证 `always()` 步骤执行**。
+
+构建阶段需要访问基础镜像源和 PyPI；HTTP 场景仅访问本机端口，不加载外部 CDN，也不调用两个 GitHub 业务接口，因此不能将整个 job 称为完全断网验收。没有镜像发布步骤。
+
+**以上 Docker 配置和脚本仍是未提交、未推送的 Day 9 工作区改动，尚未获得远程运行结果。** Day 8 的历史 CI 当时只有 Python 检查，Day 9 的本地结果也不能作为 Ubuntu / Python 3.12 远程 Docker CI 已通过的证据。本批只修改 README，没有修改 CI 或重新查询远程。
 
 **此前 Day 4 远程验收记录：** 提交 `d584a95d48281ec19fa3429f90378366f2081c88` 已推送，Backend CI 成功，见[历史运行记录](https://github.com/tiezhi7/RepoPilot/actions/runs/40859087524)。该链接只代表 Day 4；Day 5 的成功运行是上文另列的 Backend CI #4。**本批文档同步未访问或重新查询这些运行。** CI 成功本身不能替代应用实网验收，后者按上文记录的场景单独完成。
 
 Day 4、Day 5 和 Day 6 的远程结果分别绑定各自历史提交。Day 6 的依赖声明、四份锁、CI 和文档调整对应提交 `2b0a4d9403d7831e04123c12181b6719eea75c79`，已推送并通过 Backend CI #5 的 Ubuntu 开发环境验证。Day 7 本机 HTTP 记录另绑定 `5fa9a40c1dd4f938a43737e892ebd637ff7f6663`。本批 README 同步属于此后的独立文档改动，不改变历史运行的 `head_sha`，也不把已有 CI 成功结论自动延伸到其他提交。
 
-查看已记录的运行时，可在仓库页面选择 **Actions → Backend CI → 对应运行记录 → Backend checks**，核对完整提交 SHA，再展开环境版本、严格安装、`pip check` 和四项检查的实际日志。后续新提交的验收也应单独核对其 SHA。本批没有重新访问这些页面。参见 [GitHub 查看工作流运行历史](https://docs.github.com/en/actions/how-tos/monitor-workflows/view-workflow-run-history)。
+查看已记录的运行时，可在仓库页面选择 **Actions → Backend CI → 对应运行记录 → Backend checks**，核对完整提交 SHA，再展开环境版本、严格安装、`pip check` 和四项检查的实际日志。Day 9 后续提交并推送后，还需在对应运行中单独检查 **Docker checks** 的构建、HTTP 与清理步骤，不能用另一个 job 或旧 SHA 的成功代替。本批没有重新访问这些页面。参见 [GitHub 查看工作流运行历史](https://docs.github.com/en/actions/how-tos/monitor-workflows/view-workflow-run-history)。
 
 ## 下一阶段计划（尚未实施）
 
-Day 5 的提交推送、远程 CI 和最小应用实网验收已有历史记录；Day 6 已完成依赖分离、四份锁、Windows / Debian 全新环境验收、完整差异审查、本地提交、推送及 Backend CI #5 的 Ubuntu 开发环境验收。Day 7 Windows 本机 HTTP 和 Day 8 Docker 构建、镜像内容与容器 HTTP 验收均已完成；本批第三批仅同步 README，后续按独立范围进行：
+Day 5 的提交推送、远程 CI 和最小应用实网验收已有历史记录；Day 6 已完成依赖分离、四份锁、Windows / Debian 全新环境验收、完整差异审查、本地提交、推送及 Backend CI #5 的 Ubuntu 开发环境验收。Day 7 Windows 本机 HTTP 和 Day 8 Docker 本地验收已有记录，Day 8 配置已纳入提交 `f292fb33ea509d5104b9f64a38feadc9511cedbc`。Day 9 当前工作区已新增 Docker job 和标准库冒烟脚本，本地成功路径、普通失败收尾、HTTP 500 反例及后续端口补查分别记录如上，原验收器退出码 `1` 保留；本批第三批只同步 README。后续按独立范围进行：
 
-1. 完整审查 Dockerfile、.dockerignore 和 README 累计差异；经单独授权再暂存、提交及推送，并核对对应新提交的 CI。保留本次验收时 Docker 配置未提交的事实，不改写历史基线；本批不执行 Git 写操作。
-2. 如需把 Docker 构建和容器 HTTP 纳入 CI，另行设计并验证对应步骤，现有 Python 检查不能代替。
+1. 完整审查 Day 9 累计三个文件：`.github/workflows/backend-ci.yml`、`backend/scripts/smoke_http.py` 和 `README.md`；核对配置、脚本、已有成功与失败记录及验收边界。
+2. 审查通过后，分别安排并授权本地暂存与提交、限定分支推送，以及对应完整 SHA 的远程 CI 验收；分别核对 Backend checks 和 Docker checks 的实际终态、日志及清理结果，不预设成功。本批不执行这些 Git 或远程操作。
 3. 如需验证 Ubuntu 纯运行环境，另建干净环境仅安装 Linux 运行锁并独立验收，不能以现有 39 包开发环境代替。
 4. 单独安排新依赖环境中的 GitHub 应用实网验收；经原生监听服务或容器映射调用两个 GitHub 业务接口也需单独验收。Day 5 最小实网记录不改写，Day 7、Day 8 本机 HTTP 验收未执行这些调用。
 5. 如需验证其他机器访问或访问限制，先单独确定范围再验收，不能由已完成的本机 `127.0.0.1` 结果推导。

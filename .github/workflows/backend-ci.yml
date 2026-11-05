@@ -57,3 +57,236 @@ jobs:
 
       - name: Tests and coverage
         run: .venv/bin/python -m pytest --cov=app --cov-report=term-missing -q
+
+  docker:
+    name: Docker checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+        working-directory: backend
+    env:
+      STATE_NAME: repopilot-docker-${{ github.run_id }}-${{ github.run_attempt }}
+      IMAGE_TAG: repopilot-ci:docker-${{ github.run_id }}-${{ github.run_attempt }}
+      CONTAINER_NAME: repopilot-docker-${{ github.run_id }}-${{ github.run_attempt }}
+      OWNER_KEY: ${{ github.repository }}:${{ github.run_id }}:${{ github.run_attempt }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.12.16
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12.16"
+          architecture: "x64"
+
+      - name: Show Docker and host Python versions
+        run: |
+          set -euo pipefail
+          docker version
+          docker buildx version
+          python --version
+
+      # 构建需要访问基础镜像源和 PyPI；并非整个 job 都断网。
+      - name: Build runtime image
+        timeout-minutes: 15
+        run: |
+          set -euo pipefail
+          export STATE_DIR="$RUNNER_TEMP/$STATE_NAME"
+          mkdir "$STATE_DIR"
+          docker buildx build --platform linux/amd64 --load --progress plain \
+            --tag "$IMAGE_TAG" --iidfile "$STATE_DIR/build.iid" --file Dockerfile .
+          build_id=$(cat "$STATE_DIR/build.iid")
+          [[ "$build_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+          image_id=$(docker image inspect --format '{{.Id}}' "$build_id")
+          [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+          printf '%s\n' "$image_id" > "$STATE_DIR/image.id"
+          printf 'Build IID: %s; local image ID: %s\n' "$build_id" "$image_id"
+
+      - name: Start and verify owned container
+        run: |
+          set -euo pipefail
+          export STATE_DIR="$RUNNER_TEMP/$STATE_NAME"
+          image_id=$(cat "$STATE_DIR/image.id")
+          [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+          docker image inspect "$image_id" > "$STATE_DIR/image.json"
+          docker run --pull=never --detach --name "$CONTAINER_NAME" \
+            --label "io.repopilot.ci-owner=$OWNER_KEY" \
+            --cidfile "$STATE_DIR/container.id" --network bridge \
+            --publish 127.0.0.1::8000/tcp "$image_id"
+          cid=$(cat "$STATE_DIR/container.id")
+          [[ "$cid" =~ ^[0-9a-f]{64}$ ]]
+          docker container inspect "$cid" > "$STATE_DIR/container.json"
+          python -B - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          state = Path(os.environ["STATE_DIR"])
+          image_id = (state / "image.id").read_text().strip()
+          cid = (state / "container.id").read_text().strip()
+          image = json.loads((state / "image.json").read_text())[0]
+          container = json.loads((state / "container.json").read_text())[0]
+          config = container["Config"]
+          host = container["HostConfig"]
+          expected = (
+              image["Id"] == image_id
+              and container["Image"] == image_id
+              and config["Image"] == image_id
+              and container["Id"] == cid
+              and container["Name"] == "/" + os.environ["CONTAINER_NAME"]
+              and config["Labels"].get("io.repopilot.ci-owner") == os.environ["OWNER_KEY"]
+              and config["User"] == "10001:10001"
+              and config["WorkingDir"] == "/app"
+              and config["Cmd"] == image["Config"]["Cmd"]
+              and config.get("Entrypoint") == image["Config"].get("Entrypoint")
+              and container["Mounts"] == []
+              and container["State"]["Running"] is True
+              and host["NetworkMode"] == "bridge"
+              and host["Privileged"] is False
+              and not host.get("Init")
+              and host["RestartPolicy"]["Name"] == "no"
+          )
+          if not expected:
+              raise SystemExit("Container identity, image or configuration mismatch")
+          ports = container["NetworkSettings"]["Ports"]
+          bindings = host["PortBindings"]
+          if set(ports) != {"8000/tcp"} or set(bindings) != {"8000/tcp"}:
+              raise SystemExit("Unexpected port set")
+          published = ports["8000/tcp"]
+          requested = bindings["8000/tcp"]
+          if (
+              len(published) != 1
+              or len(requested) != 1
+              or published[0]["HostIp"] != "127.0.0.1"
+              or requested[0]["HostIp"] != "127.0.0.1"
+          ):
+              raise SystemExit("Port must be published only on 127.0.0.1")
+          port = published[0]["HostPort"]
+          if not re.fullmatch(r"[0-9]{1,5}", port) or not 1 <= int(port) <= 65535:
+              raise SystemExit("Invalid assigned host port")
+          (state / "port").write_text(port + "\n", encoding="ascii")
+          print(f"Verified container {cid}; host endpoint 127.0.0.1:{port}")
+          PY
+
+      - name: Real host HTTP smoke checks
+        timeout-minutes: 2
+        run: |
+          set -euo pipefail
+          export STATE_DIR="$RUNNER_TEMP/$STATE_NAME"
+          python -B scripts/smoke_http.py --port "$(cat "$STATE_DIR/port")"
+
+      # 普通步骤失败仍收尾；runner 被强制终止时不能保证本步骤执行。
+      - name: Stop, diagnose and remove owned container
+        if: always()
+        timeout-minutes: 3
+        # checkout 失败时 backend 目录可能不存在，收尾不依赖源码目录。
+        working-directory: ${{ runner.temp }}
+        run: |
+          set -euo pipefail
+          export STATE_DIR="$RUNNER_TEMP/$STATE_NAME"
+          mkdir -p "$STATE_DIR"
+          cid=$(docker container ls --all --no-trunc \
+            --filter "name=^/$CONTAINER_NAME$" --format '{{.ID}}')
+          if [[ -z "$cid" ]]; then
+            if [[ -s "$STATE_DIR/container.id" ]]; then
+              echo "Recorded container is missing; cannot verify shutdown" >&2
+              exit 1
+            fi
+            echo "No container was created for this run; nothing to clean up"
+            exit 0
+          fi
+          [[ "$cid" =~ ^[0-9a-f]{64}$ ]]
+          if [[ -s "$STATE_DIR/container.id" ]]; then
+            [[ "$cid" == "$(cat "$STATE_DIR/container.id")" ]]
+          fi
+          docker container inspect "$cid" > "$STATE_DIR/before-stop.json"
+          CHECK_CID="$cid" python -B - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          state = Path(os.environ["STATE_DIR"])
+          container = json.loads((state / "before-stop.json").read_text())[0]
+          if (
+              container["Id"] != os.environ["CHECK_CID"]
+              or container["Name"] != "/" + os.environ["CONTAINER_NAME"]
+              or container["Config"]["Labels"].get("io.repopilot.ci-owner")
+              != os.environ["OWNER_KEY"]
+          ):
+              raise SystemExit("Refusing cleanup: container ownership mismatch")
+          print("Verified cleanup ownership:", container["Id"])
+          PY
+
+          result=0
+          if ! docker logs --timestamps "$cid"; then
+            echo "Failed to read logs before stop" >&2
+            result=1
+          fi
+          if ! docker stop -t 10 "$cid"; then
+            echo "docker stop failed" >&2
+            result=1
+          fi
+          if docker container inspect "$cid" > "$STATE_DIR/after-stop.json"; then
+            if ! python -B - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          state_dir = Path(os.environ["STATE_DIR"])
+          state = json.loads((state_dir / "after-stop.json").read_text())[0]["State"]
+          print("State after stop:", json.dumps(state, sort_keys=True))
+          # 仅非运行状态允许普通删除；即使异常退出，也保留失败结论。
+          if state.get("Running") is False:
+              (state_dir / "safe-to-remove").touch()
+          if not (
+              state.get("Running") is False
+              and state.get("Status") == "exited"
+              and type(state.get("ExitCode")) is int
+              and state["ExitCode"] == 0
+              and state.get("OOMKilled") is False
+          ):
+              raise SystemExit("Abnormal container shutdown")
+          PY
+            then
+              result=1
+            fi
+          else
+            echo "Failed to inspect stopped container" >&2
+            result=1
+          fi
+
+          if ! docker logs --timestamps "$cid" > "$STATE_DIR/shutdown.log" 2>&1; then
+            echo "Failed to read logs after stop" >&2
+            result=1
+          fi
+          cat "$STATE_DIR/shutdown.log"
+          if ! grep -Fq 'Application shutdown complete' "$STATE_DIR/shutdown.log"; then
+            echo "Missing application shutdown completion log" >&2
+            result=1
+          fi
+          if ! grep -Fq 'Finished server process' "$STATE_DIR/shutdown.log"; then
+            echo "Missing server process completion log" >&2
+            result=1
+          fi
+
+          if [[ -f "$STATE_DIR/safe-to-remove" ]]; then
+            if ! docker container rm "$cid"; then
+              echo "Failed to remove owned stopped container" >&2
+              result=1
+            fi
+            remaining=$(docker container ls --all --quiet --no-trunc --filter "id=$cid")
+            if [[ -n "$remaining" ]]; then
+              echo "Owned container still exists after removal" >&2
+              result=1
+            fi
+          else
+            echo "Container is not confirmed stopped; refusing removal" >&2
+            result=1
+          fi
+          exit "$result"
