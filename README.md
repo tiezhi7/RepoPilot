@@ -6,9 +6,9 @@ RepoPilot 当前是一个基于 FastAPI 的 Python 后端，支持健康检查�
 
 仓库已提供 GitHub Actions 持续集成配置。此前已核实：Day 5 提交已推送，Backend CI #4 成功，并在 2026-10-30 完成最小应用实网验收，详见下文历史记录。Day 6 已分离依赖声明、生成四份平台锁、完成 Windows 与 Debian Linux 全新环境验收，相关变更已提交并推送，Ubuntu 开发环境的 Backend CI #5 也已成功。Day 7 第一批在全新 Windows 运行环境中完成本机 HTTP 监听验收；Day 8 第一、第二批进一步完成 Docker 本地构建和容器端口映射链路验收，均覆盖健康检查、文档和源码审查。Day 9 新增独立 Docker checks job 和标准库真实 HTTP 冒烟脚本，保留原有 Backend checks；相关变更已提交并推送，两个 job 已在提交 `130d64ff90caf7dac2e7e78f4731f07f6d757315` 的 Backend CI #9 中通过。
 
-Day 10 已在当前工作区实现 PR 请求/响应模型、受限客户端、同步路由及离线测试，将业务路由扩展为五个，冒烟脚本扩展为十项。此前已完成 Windows 和 Debian Linux 锁定开发环境全量检查，以及运行镜像重建、内容核对和 Windows 经 Docker Desktop 访问容器的十项真实 HTTP 验收。**Day 10 尚未提交或推送，没有对应远程 CI 结果；旧 CI #9/#10 不作为本批功能的通过证明。**
+Day 10 已实现 PR 请求/响应模型、受限客户端、同步路由及离线测试，将业务路由扩展为五个，冒烟脚本扩展为十项。此前已完成两平台锁定开发环境全量检查和本地运行镜像验收，随后修复 PR 链接的 ASCII 身份核对并完成定向回归。**Day 10 已随提交 `9ca16fe01532966fd1ce3dc44639b9272ca49c53` 推送，Backend CI #11 的 Backend checks 和 Docker checks 均成功。** 修复前的本地记录、修复后的定向回归与远程结果分别绑定下文的版本和环境。
 
-**Day 10 第八批只更新 README 并做静态文档检查，没有重新执行安装、测试、构建、容器或 HTTP 验收，也未联网查询 CI。** 下文 Day 10 记录基于 `27d0bdc4842c37a2bf735ad629ca77016667ff89` 加当时八项未提交改动，该旧 HEAD 本身不包含 Day 10 功能。Day 4—Day 9 的历史提交绑定、数字、失败和警告分别保留；PR 非法编号的本机 422 不代表有效 PR 实网查询通过。
+**本批仅依据已有的已核实记录同步 README，并执行静态检查，没有重新安装、测试、构建、启动容器、发送 HTTP 或查询 CI。** Day 10 第八批当时也只更新文档，其整理的修复前本地验收基于 `27d0bdc4842c37a2bf735ad629ca77016667ff89` 加当时八项未提交改动，该旧 HEAD 本身不包含 Day 10 功能。Day 4—Day 9 的历史提交绑定、数字、失败和警告分别保留。PR 非法编号的 422 不代表有效 PR 实网查询通过。
 
 ## 已实现功能
 
@@ -96,7 +96,7 @@ Day 10 已在当前工作区实现 PR 请求/响应模型、受限客户端、�
 - 新增同步 `POST /api/v1/github/pull-request`，复用每次请求独立创建、关闭客户端的依赖，只转换七类明确查询异常；原四个业务路由保持兼容。
 - 三份 PR 测试覆盖模型、客户端及 API；新增 `test_smoke_http.py`，通过临时回环 HTTP 服务和真实脚本子进程验证冒烟成功与失败，不导入应用或访问 GitHub。
 - 当前冒烟检查五个业务路由，并新增 PR 编号 `0` 返回 422 且错误位置精确为 `["body","pull_number"]` 的检查，共十项；不执行有效上游 GitHub 查询。
-- Windows / CPython 3.14.6 与 Debian / CPython 3.12.16 锁定开发环境全量验收，以及本次运行镜像的真实本机 HTTP 验收已完成，详见下文；这些工作仍未提交或推送。
+- Windows / CPython 3.14.6 与 Debian / CPython 3.12.16 的 1309 项全量验收及本地运行镜像属于 ASCII 修复前记录。修复后完成定向回归，并随上述提交推送，由 Backend CI #11 验证两个 job，详见下文。
 
 以上为已有功能、配置与已完成的验收；后面的“下一阶段计划”尚未实施。
 
@@ -148,7 +148,7 @@ RepoPilot/
 - `AGENTS.md`：记录项目范围和编程协作规则。
 - `.gitignore`：告诉 Git 哪些文件不需要纳入版本管理。
 - `README.md`：介绍项目、目录结构及使用方式。
-- `.github/workflows/backend-ci.yml`：定义独立的 Backend checks 和 Docker checks；两个 job 的 Day 9 历史结果绑定 CI #9。后续提交将运行其自身版本的脚本，Day 10 尚无对应远程结果。
+- `.github/workflows/backend-ci.yml`：定义独立的 Backend checks 和 Docker checks，Day 9 与 Day 10 的历史结果分别绑定 CI #9 和 CI #11 的完整提交 SHA。后续提交运行其自身版本的脚本并单独验收。
 - `backend/Dockerfile`：定义固定 Linux 基础镜像、严格运行锁安装、非 root 用户和默认 Uvicorn 启动命令。
 - `backend/.dockerignore`：以允许列表限制 `backend` 构建上下文，排除虚拟环境、测试、缓存及其他无关输入。
 - `backend/requirements.txt`：维护 FastAPI、Uvicorn 和 HTTPX 三项运行直接依赖的版本范围，是生成运行锁的输入。
@@ -635,7 +635,7 @@ if ($LASTEXITCODE -ne 0) { throw '本批容器删除失败，先检查实际状�
 | `state` | 仅 `open` / `closed` | PR 状态，不增加 `merged` 枚举 |
 | `draft` | 严格布尔值 | 是否为草稿 |
 | `merged` | 严格布尔值 | 是否已合并，不根据其他字段推导 |
-| `html_url` | 非空字符串，客户端另核对身份 | 通过核对的原 PR 网页地址，不访问该链接 |
+| `html_url` | 非空字符串，客户端另要求 ASCII 并核对身份 | 通过核对的原 PR 网页地址，不访问该链接 |
 | `base_ref` | 非空字符串 | 目标分支名称，允许斜杠和 Unicode |
 | `head_ref` | 非空字符串 | 来源分支名称，允许斜杠和 Unicode |
 | `base_sha` | 恰好 40 位小写十六进制字符串 | 查询时返回的目标端提交 SHA |
@@ -660,7 +660,7 @@ https://api.github.com/repos/{owner}/{repo}/pulls/{pull_number}
 - 只有需要读取正文时才检查 HTTP `Content-Encoding`；允许缺省或去除两端空白、忽略大小写后为 `identity`，其他编码拒绝。该方法发送 `Accept-Encoding: identity`，不污染旧元数据方法的请求头。
 - 正文严格按 UTF-8 解码并解析为 JSON 对象；无效编码、JSON、非对象或递归解析错误均拒绝。随后显式选择字段，用响应模型严格验证，不把整个上游对象直接返回；最终字符串也必须可严格编码为 UTF-8。
 - `base` 和 `head` 必须包含所需的 `ref`、`sha`。head 可以来自 fork，不要求 `head.repo` 存在或非空，也不另查来源仓库。
-- 上游 `number` 必须是真正整数且等于请求编号。模型中的 `html_url` 只要求非空，客户端另将其与 `https://github.com/{owner}/{repo}/pull/{pull_number}` 作完整、大小写不敏感比较，不 strip；用户信息、端口、查询、片段、额外路径、末尾斜杠、百分号编码或反斜杠均不能混入。返回原 `html_url`，不请求它。
+- 上游 `number` 必须是真正整数且等于请求编号。模型中的 `html_url` 只要求非空，客户端先要求该链接只含 ASCII 字符，再与 `https://github.com/{owner}/{repo}/pull/{pull_number}` 作完整、大小写不敏感比较，不 strip。用户信息、端口、查询、片段、额外路径、末尾斜杠、百分号编码或反斜杠均不能混入。返回原 `html_url`，不请求它。标题和分支名继续支持 Unicode。
 - 成功、超限、状态错误和读取异常时，响应流均由上下文管理释放；每次 API 请求创建的客户端也由已有依赖关闭，不创建模块级共享客户端。
 
 这个 1 MiB 限制只属于 PR 方法，不替代文件接口的 HTTP 正文、Base64 或源码限制。仓库元数据方法仍没有相同的流式正文上限。
@@ -766,7 +766,7 @@ URL、文件路径和 PR 编号纯验证函数本身不进行 DNS 或 HTTP 请�
 - **GitHub 客户端没有重试、缓存或认证。** 当前也没有调用方鉴权或应用级请求限流；文件有受限响应体和源码配额，PR 有独立 1 MiB 正文上限，元数据尚无相同的流式正文限制，不属于完整生产防护。
 - **网络配置固定。** `trust_env=False`，不会自动采用环境代理或自定义证书变量；需要代理或企业证书的环境可能无法直接连接。2026-10-30 已完成最小应用实网验收，但期间也遇到匿名限流和连接超时，不保证所有网络环境或后续请求始终可用；其他机器访问和生产部署仍未验收。
 - **本机监听验收范围有限。** Day 7—Day 9 当时只验证健康、文档及源码审查，未调用当时两个 GitHub 路由。Day 10 十项容器 HTTP 另增加 PR 非法编号的 422，未执行有效上游查询；不能据此声称有效 PR 实网或所有 GitHub 路由已验收，也不能推导其他机器一定不可访问。
-- **CI 验证范围有限。** CI #9/#10 等旧提交结果不覆盖未提交的 Day 10 工作区，也不等于 Ubuntu 原生纯运行环境已单独验证。Day 9 原验收器退出 1 与后续端口补查分别保留。Day 10 Ubuntu 远程 CI、有效 PR 实网、镜像发布、其他机器访问和生产部署仍待单独验收。
+- **CI 验证范围有限。** CI #11 已验证 Day 10 提交 `9ca16fe01532966fd1ce3dc44639b9272ca49c53` 的两个 job，不能自动覆盖后续提交。Day 9 原验收器退出 1 与后续端口补查分别保留。有效 PR 实网、Ubuntu 原生纯运行环境、镜像发布、其他机器访问和生产部署仍待单独验收。
 - **没有 AI 审查。** 不调用 LLM（大语言模型）或付费 AI API，不生成 AI 修复建议。
 - **没有产品前端、数据库或审查记录持久化。** `/docs` 是 FastAPI 提供的接口调试文档。
 
@@ -856,7 +856,7 @@ Linux：
 
 当前 CI 测量行覆盖率，未添加 `--cov-branch`，也未设置最低覆盖率门槛。若要单独检查分支覆盖率，可在测试命令中增加 `--cov-branch`；它与行覆盖率是不同的统计口径。
 
-下列 Day 4—Day 9 均为历史记录，其中“本批”等措辞沿用当时的文档批次语境，不表示 Day 10 第八批重新执行过这些检查。原数字、失败、警告、提交绑定和链接保留。
+下列 Day 4—Day 9 均为历史记录，其中“本批”等措辞沿用当时的文档批次语境，不表示本次 README 同步重新执行过这些检查。原数字、失败、警告、提交绑定和链接保留。
 
 ### Day 4 本地验收记录（历史）
 
@@ -1197,9 +1197,9 @@ sha256:4291af53c347708cf87ab8f97aab02c0670753912d18054de3267c1484f12702
 
 **CI #9 永久绑定上述完整 SHA，不自动代表后续文档提交。** 后续提交应按自身 SHA 核对 CI，不预填新运行编号或结果，也无需为每次后续文档 CI 再追加历史记录。本批只同步文档，没有重新安装、测试、构建、启动服务或联网查询。
 
-### Day 10 本地验收记录（此前第一至第七批，尚未提交）
+### Day 10 本地验收记录（第一至第七批，ASCII 修复前，验收时尚未提交）
 
-以下整理此前已完成的结果，**本次第八批仅同步 README，没有重新安装、测试、构建、启动容器、发送 HTTP 或查询 CI**。验收基线为分支 `day4/github-api` 的 HEAD `27d0bdc4842c37a2bf735ad629ca77016667ff89` 加当时八项未提交改动：三个应用文件、冒烟脚本及四份新测试。该旧 HEAD 本身不包含 Day 10 功能；本次 README 更新后累计九项改动，仍未提交、推送或取得对应远程结果。
+以下保留第八批当时整理的本地验收结果，第八批仅同步 README，没有重新执行验收。验收基线为分支 `day4/github-api` 的 HEAD `27d0bdc4842c37a2bf735ad629ca77016667ff89` 加当时八项未提交改动，包括三个应用文件、冒烟脚本及四份新测试。该旧 HEAD 本身不包含 Day 10 功能。当时 README 更新后累计九项改动，尚未提交、推送或取得对应远程结果。以下两平台 1309 项全量验收及本地运行镜像均属于 ASCII 修复前记录，后续修复、提交和 CI #11 另节记录。
 
 #### 前四批：非锁定环境检查与诊断
 
@@ -1280,7 +1280,82 @@ sha256:10545892784e3a087e155b1f6a3687a56272ee98ea728cdc0bdd9fc6fc9df216
 
 第七批准备操作曾因自动审批 403 未启动，没有进程退出码，也不计作实际构建；经用户继续指令后，沿原工具和正常审批流程恢复，实际构建仍只有上述一次。最终 32 个项目文件的集合、大小和 SHA-256、忽略清单及 Git 状态均保持不变。
 
-**边界：** 上述两平台离线测试和 Windows 经 Docker Desktop 访问本次镜像的本机链路均已有证据，不代表 Day 10 Ubuntu 远程 CI、有效 PR 实网、Ubuntu 原生纯运行环境、镜像发布、其他机器访问或生产部署通过。Day 5 的既有实网历史记录仍单独保留；Day 7—Day 9 当时四路由、九项冒烟的记录没有改写。
+**边界：** 上述结果覆盖 ASCII 修复前的两平台开发环境和 Windows 经 Docker Desktop 访问当时镜像的本机链路。当时尚未取得 Day 10 Ubuntu 远程 CI 结果，后续 CI #11 按修复后的完整提交另节记录。有效 PR 实网、Ubuntu 原生纯运行环境、镜像发布、其他机器访问和生产部署仍待单独验收。Day 5 的既有实网历史记录仍单独保留，Day 7—Day 9 当时四路由、九项冒烟的记录没有改写。
+
+### Day 10 ASCII 链接修复与定向回归记录（历史）
+
+完整差异审查发现 PR 链接身份核对存在一项 P2 问题。Python 的 Unicode `lower()` 可能将非 ASCII 字符转为 ASCII 字母，导致不同原始链接比较相等。客户端已增加 `html_url.isascii()` 检查，再忽略大小写比较完整链接，保留通过核对的原值。标题和分支名仍允许 Unicode。
+
+修复集中在 `backend/app/github_client.py` 及现有 PR 客户端测试。新增回归用例先复现旧行为，修复后通过，已有合法 ASCII 大小写链接和 Unicode 元数据测试继续通过。
+
+| 定向回归 | 修复后已有实际记录 |
+| --- | --- |
+| 环境 | Windows 锁定开发环境，CPython 3.14.6 |
+| PR 客户端和模型 | 合计 `532 passed` |
+| PR API 集成 | `74 passed` |
+| Ruff、格式检查及 mypy | 均通过，检查范围沿用该次定向回归记录 |
+
+首次合并运行进入 API 测试后停滞并中止，原因未确定。随后单独运行 API 集成测试通过，保留两次运行各自的实际结果。该次没有重新执行两平台全量验收或重建运行镜像，上文 1309 项全量测试的数字、警告和本地镜像 ID 均属于修复前版本。修复已纳入下述 Day 10 提交。
+
+### Day 10 提交、推送与远程 CI 验收记录（历史，绑定指定提交）
+
+以下依据用户提供的已核实结果整理，本批只同步 README 并做静态检查，没有重新推送、查询 CI 或执行验收。
+
+- 提交为 `9ca16fe01532966fd1ce3dc44639b9272ca49c53`，提交信息为 `feat: add read-only GitHub pull request overview`。
+- 直接父提交为 `27d0bdc4842c37a2bf735ad629ca77016667ff89`，已推送分支为 `day4/github-api`。
+- 运行记录为 [Backend CI #11](https://github.com/tiezhi7/RepoPilot/actions/runs/42985490946)，Run ID 为 `42985490946`，run number 为 `11`，attempt 为 `1`。
+- 工作流为 `.github/workflows/backend-ci.yml`，事件为 `push`，`head_branch` 为 `day4/github-api`，`head_sha` 与上述完整提交 SHA 一致。
+- 最终状态为 `completed / success`，Backend checks 和 Docker checks 均成功。
+
+#### Git 推送经过
+
+此前推送曾报告 `Recv failure: Connection was reset`，连接器随后确认远端仍为父提交。本次恢复期间，直接 Git 只读查询也曾无法连接 `github.com:443` 并退出 1。Windows 系统代理 API 确认既有 HTTP 代理为 `http://127.0.0.1:7892`，通过该路径的只读查询退出 0。
+
+随后仅让本次 Git 子进程临时使用该代理，指定完整 SHA 和完整目标引用的推送命令执行一次，退出 0。连接器实时确认远端 `refs/heads/day4/github-api` 已指向 `9ca16fe01532966fd1ce3dc44639b9272ca49c53`。持久 Git 和代理配置保持原样。该地址只记录当时的 Git 推送路径，路径当时可用，连接重置的根因仍未确定。
+
+#### Backend checks 远程实际记录
+
+| 项目 | CI #11 结果 |
+| --- | --- |
+| 系统与解释器 | Ubuntu 24.04.5 LTS，CPython 3.12.16 x64 |
+| 虚拟环境 | 独立 `backend/.venv`，pip 26.1.2 |
+| 项目依赖 | 从官方 PyPI 严格安装 Linux 开发锁 39 包，使用 `--require-hashes --only-binary=:all:` |
+| `pip check` | `No broken requirements found.` |
+| Ruff | `All checks passed!` |
+| 格式检查 | `19 files already formatted` |
+| mypy | 6 个应用源文件通过 |
+| pytest | `1310 passed in 8.02s`，无失败、跳过或测试警告 |
+| `app` 行覆盖率 | 479 条语句、0 未覆盖、100%，无未覆盖行，未收集分支覆盖率 |
+
+以上是修复后提交在 Ubuntu 开发环境中的本次远程结果，上文两平台修复前 1309 项记录保持原值。
+
+#### Docker checks 远程实际记录
+
+| 项目 | CI #11 结果 |
+| --- | --- |
+| 工具版本 | Docker CLI/Engine 28.0.4，buildx 0.38.1，宿主机 Python 3.12.16 |
+| 构建 | 成功，未见 `CACHED` 标记，venv 创建、严格运行锁安装和源码复制均实际执行，构建中的 `pip check` 通过 |
+| 镜像身份 | Build IID 与本次实际镜像 ID 一致，完整值见下方 |
+| 容器归属与配置 | 核对通过，保持默认 CMD/Entrypoint、用户 `10001:10001`、工作目录 `/app`，无挂载及唯一动态端口映射 |
+| 历史动态地址 | `127.0.0.1:32768`，不是固定使用地址 |
+| 就绪探测 | 前两次连接重置，第三次成功 |
+| 真实 HTTP | 十项通过，包含五路由 OpenAPI，空 code 和 PR 编号 0 为 422，其余八项为 200 |
+| 停止步骤 | `docker stop` 未进入失败分支，其数值退出码未单独打印 |
+| 容器自身状态 | `Running=false`、`Status=exited`、`ExitCode=0`、`OOMKilled=false` |
+| 关闭日志 | 包含 `Application shutdown complete` 和 `Finished server process` |
+| 删除与残留检查 | 本批容器普通删除，删除后残留检查通过，清理步骤成功 |
+
+Build IID 和实际镜像 ID 的共同值为
+
+```text
+sha256:261cab9fad05bc8bc0507b4aa5152ad74d86f9648d1b92f3beeadedce115e884
+```
+
+日志中的构建执行记录不等于所有环节绝无缓存。容器内完整 Python 版本及系统信息没有单独查询，Ubuntu runner 与 Dockerfile 指定的容器目标分别记录。容器自身退出码 0 与 `docker stop` 命令未单独打印的数值退出码也分别保留。
+
+十项 HTTP 检查中的 PR 编号 0 只验证输入边界，未执行有效 PR 查询。有效 PR 实网、Ubuntu 原生纯运行环境、镜像发布、其他机器访问和生产部署继续待单独验收。
+
+**CI #11 永久绑定 `9ca16fe01532966fd1ce3dc44639b9272ca49c53`。** 后续文档提交按自身 SHA 验收，不能自动沿用此次成功，也无需为每次文档 CI 追加历史节。
 
 ## Ruff 代码质量检查与格式检查
 
@@ -1342,7 +1417,7 @@ Docker job 总时限为 **20 分钟**，显式设置 Bash 和默认工作目录 
 | 镜像身份 | 从构建 IID 核实实际本地镜像 ID，保存于 `RUNNER_TEMP` 的本次状态目录；按该 ID 启动，不使用历史镜像 ID |
 | 容器启动 | `--pull=never`、唯一名称及 `io.repopilot.ci-owner` 归属标签、`--cidfile`、bridge 网络，仅动态发布 `127.0.0.1::8000/tcp`；保留默认 CMD、用户和工作目录，无挂载，不使用 `--rm` |
 | 配置核对 | 检查完整 ID、名称、归属标签、镜像 ID、用户 `10001:10001`、工作目录 `/app`、默认 CMD/Entrypoint、无挂载及唯一端口映射，从实际 inspect 读取并校验宿主机端口 |
-| HTTP 冒烟 | 在 `backend` 执行 `python -B scripts/smoke_http.py --port <实际宿主机端口>`；步骤时限 2 分钟，读取当前提交的脚本；Day 10 工作区版本为十项，包含非法 PR 编号请求，不执行有效上游 GitHub 查询 |
+| HTTP 冒烟 | 在 `backend` 执行 `python -B scripts/smoke_http.py --port <实际宿主机端口>`；步骤时限 2 分钟，读取当前提交的十项脚本，包含非法 PR 编号请求，不执行有效上游 GitHub 查询 |
 | 日志与清理 | 独立 `if: always()` 步骤，时限 3 分钟，工作目录改为 `${{ runner.temp }}`，不依赖源码目录存在；核对本次容器归属，收集停止前后日志，执行 `docker stop -t 10`，读取停止状态后普通删除本批已停止容器 |
 
 冒烟脚本只允许端口 `1–65535`，目标主机固定为 `127.0.0.1`；使用 `http.client` 建立真实 HTTP 连接，不使用环境代理或自动跟随重定向，连接在成功或异常时关闭。连接和读写操作设置最长 5 秒超时，就绪探测按剩余期限收紧，就绪等待最多 45 秒；仅就绪探测有限重试，业务响应不符合预期立即非零退出，逐项输出检查名称、状态码和结果。
@@ -1351,20 +1426,20 @@ Docker job 总时限为 **20 分钟**，显式设置 Bash 和默认工作目录 
 
 构建阶段需要访问基础镜像源和 PyPI；HTTP 场景仅访问本机端口，不加载外部 CDN。当前脚本会调用 PR 业务路由的非法输入边界，但不执行有效上游 GitHub 查询，因此不能将整个 job 称为完全断网验收。没有镜像发布步骤。
 
-**Day 9 当时的 Docker 配置和九项脚本随提交 `130d64ff90caf7dac2e7e78f4731f07f6d757315` 推送，并通过 Backend CI #9 的两个 job。** 当前工作流文件没有因 Day 10 改动，但会调用仓库相应版本的脚本；Day 10 的十项脚本尚未提交或推送，Ubuntu 远程实际执行仍未验证。旧 CI #9/#10 只对应其自身提交，不能替代 Day 10 的结果。本批只修改 README，没有修改 CI、重新查询远程或执行验收；也不为旧文档提交追加新 CI 历史记录。
+**Day 9 当时的 Docker 配置和九项脚本随提交 `130d64ff90caf7dac2e7e78f4731f07f6d757315` 推送，并通过 Backend CI #9 的两个 job。** 当前工作流文件没有因 Day 10 改动，但会调用仓库相应版本的脚本。Day 10 的十项脚本已随提交 `9ca16fe01532966fd1ce3dc44639b9272ca49c53` 推送，两个 job 均在 Backend CI #11 中成功。旧 CI #9/#10 仍只对应其自身提交。本批仅依据已有记录同步 README，没有修改 CI、重新查询远程或执行验收。
 
 **此前 Day 4 远程验收记录：** 提交 `d584a95d48281ec19fa3429f90378366f2081c88` 已推送，Backend CI 成功，见[历史运行记录](https://github.com/tiezhi7/RepoPilot/actions/runs/40859087524)。该链接只代表 Day 4；Day 5 的成功运行是上文另列的 Backend CI #4。**本批文档同步未访问或重新查询这些运行。** CI 成功本身不能替代应用实网验收，后者按上文记录的场景单独完成。
 
 Day 4、Day 5 和 Day 6 的远程结果分别绑定各自历史提交。Day 6 的依赖声明、四份锁、CI 和文档调整对应提交 `2b0a4d9403d7831e04123c12181b6719eea75c79`，已推送并通过 Backend CI #5 的 Ubuntu 开发环境验证。Day 7 本机 HTTP 记录另绑定 `5fa9a40c1dd4f938a43737e892ebd637ff7f6663`。本批 README 同步属于此后的独立文档改动，不改变历史运行的 `head_sha`，也不把已有 CI 成功结论自动延伸到其他提交。
 
-查看已记录的运行时，可在仓库页面选择 **Actions → Backend CI → 对应运行记录 → Backend checks**，核对完整提交 SHA，再展开环境版本、严格安装、`pip check` 和四项检查的实际日志。查看 CI #9 时还需单独检查 **Docker checks** 的构建、HTTP 与清理步骤；后续提交同样按自身 SHA 核对，不能用另一个 job 或旧 SHA 的成功代替。本批没有重新访问这些页面。参见 [GitHub 查看工作流运行历史](https://docs.github.com/en/actions/how-tos/monitor-workflows/view-workflow-run-history)。
+查看已记录的运行时，可在仓库页面选择 **Actions → Backend CI → 对应运行记录 → Backend checks**，核对完整提交 SHA，再展开环境版本、严格安装、`pip check` 和四项检查的实际日志。查看 CI #9 或 CI #11 时还需单独检查 **Docker checks** 的构建、HTTP 与清理步骤。后续提交同样按自身 SHA 核对，不能用另一个 job 或旧 SHA 的成功代替。本批没有重新访问这些页面。参见 [GitHub 查看工作流运行历史](https://docs.github.com/en/actions/how-tos/monitor-workflows/view-workflow-run-history)。
 
 ## 下一阶段计划（尚未实施）
 
-Day 4—Day 9 的历史提交、CI 和验收继续按各自记录保留，尤其 Day 9 原验收器退出 `1` 与后续端口补查仍分别记录。Day 10 已完成 PR 概览、五路由/十项冒烟、两平台锁定开发环境和本次运行镜像本机 HTTP 验收；累计九项工作区改动尚未提交、推送。本批仅同步 README，后续按独立授权范围进行：
+Day 4—Day 9 的历史提交、CI 和验收继续按各自记录保留，尤其 Day 9 原验收器退出 `1` 与后续端口补查仍分别记录。Day 10 已完成 PR 概览、五路由/十项冒烟、修复前两平台全量及本地镜像验收、ASCII 修复与定向回归，并已提交、推送，由指定 SHA 的 CI #11 验证两个 job。本批仅同步 README，后续按独立授权范围进行。
 
-1. 下一批只读审查累计九项差异，核对实现、测试、README、历史绑定和验证边界，不直接修复或执行 Git 写操作。
-2. 审查通过后，单独授权普通本地提交，再分别安排推送及对应完整 SHA 的 Day 10 Ubuntu 远程 Backend checks / Docker checks 验收；不能用旧运行或本地结果代替。
+1. 下一步只读复核本次 README 差异，核对当前说明、历史绑定和验证边界。
+2. 复核通过后再单独安排文档提交、推送及对应 SHA 的 CI 验收，无需为每次后续文档 CI 追加历史节。
 3. 单独安排有效 PR 的 GitHub 实网验收，明确网络、限额及测试对象；PR 编号 0 的本机 422 不替代它，Day 5 实网历史记录也不扩展为 PR 已验证。
 4. 如需验证 Ubuntu 原生纯运行环境，另建干净环境仅安装运行锁并独立验收，不能以 39 包开发环境或 Debian 容器代替。
 5. 镜像发布、其他机器访问/访问限制和生产部署分别确定范围并授权验收，不从本机 `127.0.0.1`、离线测试或历史 CI 推导通过。
