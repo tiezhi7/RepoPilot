@@ -157,3 +157,76 @@ class GitHubFileReviewResponse(BaseModel):
     repository_url: str
     file_path: str
     review: ReviewResponse
+
+
+# 这是本项目的输入限制，不代表 GitHub 官方的 PR 编号上限。
+_MAX_GITHUB_PULL_NUMBER = 2_147_483_647
+
+
+def validate_github_pull_number(pull_number: object) -> int:
+    """只接受范围内的真正整数，不转换字符串、浮点数或布尔值。"""
+    # bool 是 int 的子类，因此这里不能使用 isinstance(value, int)。
+    if type(pull_number) is not int or not 1 <= pull_number <= _MAX_GITHUB_PULL_NUMBER:
+        raise ValueError("PR 编号必须是 1–2147483647 范围内的整数。")
+    return pull_number
+
+
+class GitHubPullRequestRequest(BaseModel):
+    """PR 概览的查询条件，只接收仓库主页地址和 PR 编号。"""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    repository_url: str = Field(min_length=1, max_length=_MAX_GITHUB_REPOSITORY_URL_LENGTH)
+    pull_number: int = Field(ge=1, le=_MAX_GITHUB_PULL_NUMBER)
+
+    @field_validator("repository_url")
+    @classmethod
+    def validate_repository_url(cls, value: str) -> str:
+        parse_github_repository_url(value)
+        return value
+
+    @field_validator("pull_number", mode="before")
+    @classmethod
+    def validate_pull_number(cls, value: object) -> int:
+        """在 Pydantic 转换类型之前复用纯函数，保留严格的编号规则。"""
+        return validate_github_pull_number(value)
+
+
+class GitHubPullRequestResponse(BaseModel):
+    """只返回约定的十四个平铺字段，上游对象的映射留给客户端。"""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    repository_url: str = Field(min_length=1, max_length=_MAX_GITHUB_REPOSITORY_URL_LENGTH)
+    pull_number: int = Field(ge=1, le=_MAX_GITHUB_PULL_NUMBER)
+    title: str = Field(min_length=1)
+    state: Literal["open", "closed"]
+    draft: bool
+    merged: bool
+    html_url: str = Field(min_length=1)
+    base_ref: str = Field(min_length=1)
+    head_ref: str = Field(min_length=1)
+    base_sha: str = Field(min_length=40, max_length=40)
+    head_sha: str = Field(min_length=40, max_length=40)
+    changed_files: int = Field(ge=0)
+    additions: int = Field(ge=0)
+    deletions: int = Field(ge=0)
+
+    @field_validator("repository_url")
+    @classmethod
+    def validate_repository_url(cls, value: str) -> str:
+        parse_github_repository_url(value)
+        return value
+
+    @field_validator("pull_number", mode="before")
+    @classmethod
+    def validate_pull_number(cls, value: object) -> int:
+        return validate_github_pull_number(value)
+
+    @field_validator("base_sha", "head_sha")
+    @classmethod
+    def validate_commit_sha(cls, value: str) -> str:
+        # fullmatch 要求整个字符串匹配，不能接受尾部换行或隐式改写大小写。
+        if re.fullmatch(r"[0-9a-f]{40}", value) is None:
+            raise ValueError("提交 SHA 必须是 40 位小写十六进制字符串。")
+        return value

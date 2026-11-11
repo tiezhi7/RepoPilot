@@ -10,15 +10,19 @@ import httpx
 from pydantic import ValidationError
 
 from .schemas import (
+    GitHubPullRequestResponse,
     GitHubRepositoryResponse,
     parse_github_repository_url,
     validate_github_file_path,
+    validate_github_pull_number,
 )
 
 _MAX_FILE_RESPONSE_BYTES = 65_536
 _MAX_PYTHON_FILE_BYTES = 20_000
 _MAX_BASE64_CHARACTERS = 26_668
 _FILE_UPSTREAM_MESSAGE = "GitHub 返回了无效或非预期的文件响应。"
+_MAX_PR_RESPONSE_BYTES = 1_048_576
+_PR_UPSTREAM_MESSAGE = "GitHub 返回了无效或非预期的 PR 响应。"
 
 
 class GitHubClientError(Exception):
@@ -156,6 +160,70 @@ def _decode_python_file(payload: dict[str, object], file_path: str) -> str:
         raise GitHubUnsupportedFileError("GitHub 文件类型或编码不受支持。") from None
 
 
+def _read_pull_request_response(response: httpx.Response) -> dict[str, object]:
+    """收集有界原始正文，严格按 UTF-8 和 JSON 对象解析，不访问响应中的链接。"""
+    if response.headers.get("Content-Encoding", "identity").strip().lower() != "identity":
+        raise GitHubUpstreamError(_PR_UPSTREAM_MESSAGE)
+    body = bytearray()
+    for chunk in response.iter_raw():
+        # 1 MiB 是项目策略；不能相信 Content-Length，也不能先加入再判断超限。
+        if len(body) + len(chunk) > _MAX_PR_RESPONSE_BYTES:
+            raise GitHubUpstreamError(_PR_UPSTREAM_MESSAGE)
+        body.extend(chunk)
+    try:
+        payload: object = json.loads(body.decode("utf-8"))
+    except (ValueError, RecursionError):
+        raise GitHubUpstreamError(_PR_UPSTREAM_MESSAGE) from None
+    if not isinstance(payload, dict):
+        raise GitHubUpstreamError(_PR_UPSTREAM_MESSAGE)
+    return payload
+
+
+def _pull_request_overview(
+    payload: dict[str, object],
+    repository_url: str,
+    pull_number: int,
+    expected_html_url: str,
+) -> GitHubPullRequestResponse:
+    """显式映射平铺字段，验证类型、可编码性与 PR 身份，不推导合并状态。"""
+    try:
+        base = payload["base"]
+        head = payload["head"]
+        if not isinstance(base, dict) or not isinstance(head, dict):
+            raise GitHubUpstreamError(_PR_UPSTREAM_MESSAGE)
+        result = GitHubPullRequestResponse.model_validate(
+            {
+                "repository_url": repository_url,
+                "pull_number": payload["number"],
+                "title": payload["title"],
+                "state": payload["state"],
+                "draft": payload["draft"],
+                "merged": payload["merged"],
+                "html_url": payload["html_url"],
+                "base_ref": base["ref"],
+                "head_ref": head["ref"],
+                "base_sha": base["sha"],
+                "head_sha": head["sha"],
+                "changed_files": payload["changed_files"],
+                "additions": payload["additions"],
+                "deletions": payload["deletions"],
+            }
+        )
+        # JSON 转义可能包含孤立代理码点；不能把无法严格编码的字符串交给路由。
+        for value in result.model_dump().values():
+            if isinstance(value, str):
+                value.encode("utf-8")
+    except (KeyError, ValidationError, UnicodeEncodeError):
+        raise GitHubUpstreamError(_PR_UPSTREAM_MESSAGE) from None
+    if (
+        result.pull_number != pull_number
+        or not result.html_url.isascii()
+        or result.html_url.lower() != expected_html_url.lower()
+    ):
+        raise GitHubUpstreamError(_PR_UPSTREAM_MESSAGE)
+    return result
+
+
 class GitHubRepositoryClient:
     """固定访问 api.github.com；transport 仅供受信任的应用代码和测试注入。"""
 
@@ -264,6 +332,60 @@ class GitHubRepositoryClient:
                 if payload is None:
                     raise GitHubUpstreamError(_FILE_UPSTREAM_MESSAGE)
                 return _decode_python_file(payload, file_path)
+        except httpx.TimeoutException:
+            raise GitHubTimeoutError("GitHub 请求超时。") from None
+        except httpx.RequestError:
+            raise GitHubNetworkError("GitHub 网络请求失败。") from None
+
+    def fetch_pull_request(
+        self, repository_url: str, pull_number: int
+    ) -> GitHubPullRequestResponse:
+        """单次读取受限的 PR 概览；输入先验证，响应关闭后客户端仍可复用。"""
+        try:
+            if not isinstance(repository_url, str):
+                raise ValueError("仓库地址必须是字符串。")
+            owner, repo = parse_github_repository_url(repository_url)
+            validate_github_pull_number(pull_number)
+        except ValueError:
+            raise ValueError("仓库地址或 PR 编号无效。") from None
+
+        # try 同时覆盖连接、流式读取及 with 退出时的 HTTPX 错误。
+        try:
+            with self._client.stream(
+                "GET",
+                f"/repos/{owner}/{repo}/pulls/{pull_number}",
+                headers={"Accept-Encoding": "identity"},
+            ) as response:
+                status = response.status_code
+                if status == 404:
+                    raise GitHubNotFoundError("仓库或 PR 不存在或不可公开访问。")
+                if status == 429:
+                    raise GitHubRateLimitError("GitHub 请求受到限流，请稍后重试。")
+                if (
+                    status == 403
+                    and response.headers.get("X-RateLimit-Remaining", "").strip() == "0"
+                ):
+                    raise GitHubRateLimitError("GitHub 请求受到限流，请稍后重试。")
+                if 300 <= status < 400:
+                    raise GitHubRedirectError("GitHub 返回了重定向，请使用仓库当前的主页地址。")
+                if status not in {200, 403}:
+                    raise GitHubUpstreamError(_PR_UPSTREAM_MESSAGE)
+
+                payload = _read_pull_request_response(response)
+                if status == 403:
+                    message = payload.get("message")
+                    if isinstance(message, str) and (
+                        "api rate limit" in message.lower()
+                        or "secondary rate limit" in message.lower()
+                    ):
+                        raise GitHubRateLimitError("GitHub 请求受到限流，请稍后重试。")
+                    raise GitHubForbiddenError("GitHub 拒绝访问该仓库或 PR。")
+                return _pull_request_overview(
+                    payload,
+                    repository_url,
+                    pull_number,
+                    f"https://github.com/{owner}/{repo}/pull/{pull_number}",
+                )
         except httpx.TimeoutException:
             raise GitHubTimeoutError("GitHub 请求超时。") from None
         except httpx.RequestError:

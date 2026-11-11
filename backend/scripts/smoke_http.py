@@ -38,7 +38,7 @@ def request(
     port: int,
     method: str,
     path: str,
-    payload: dict[str, str] | None = None,
+    payload: dict[str, str | int] | None = None,
     deadline: float | None = None,
 ) -> tuple[int, bytes]:
     # HTTPConnection 直接连接固定地址，不使用代理，也不会自动跟随重定向。
@@ -166,11 +166,12 @@ def run(port: int) -> None:
         "/api/v1/reviews": "post",
         "/api/v1/github/repository": "post",
         "/api/v1/github/file-review": "post",
+        "/api/v1/github/pull-request": "post",
     }
     for path, method in expected.items():
         route = paths.get(path) if isinstance(paths, dict) else None
         require(isinstance(route, dict) and method in route, f"缺少路由或方法：{path}")
-    print("PASS OpenAPI 四个业务路由", flush=True)
+    print("PASS OpenAPI 五个业务路由", flush=True)
 
     review(port, "正常源码", "x = 1\n")
     review(port, "print 调用", "print('day9')\n", "PY_PRINT", "info")
@@ -198,12 +199,35 @@ def run(port: int) -> None:
 
     # 此字符串仅通过 JSON 提交，验收脚本自身不执行它。
     review(port, "源码不执行", 'raise RuntimeError("DAY9_MUST_NOT_EXECUTE")\n')
+
+    print("CHECK PR 编号验证", flush=True)
+    status, body = request(
+        port,
+        "POST",
+        "/api/v1/github/pull-request",
+        {"repository_url": "https://github.com/example/repo", "pull_number": 0},
+    )
+    print(f"PR 编号验证: HTTP {status}", flush=True)
+    require(status == 422, "无效 PR 编号应返回 422")
+    result = json_body(body)
+    details = result.get("detail") if isinstance(result, dict) else None
+    require(isinstance(details, list) and len(details) > 0, "detail 应为非空验证错误数组")
+    require(
+        isinstance(details, list)
+        and any(
+            isinstance(error, dict) and error.get("loc") == ["body", "pull_number"]
+            for error in details
+        ),
+        "验证错误未指向 body.pull_number 字段",
+    )
+    print("PASS PR 编号验证", flush=True)
+
     health(port, "最后健康检查")
-    print("PASS 全部九项真实 HTTP 检查", flush=True)
+    print("PASS 全部十项真实 HTTP 检查", flush=True)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="检查本机容器端口的九项真实 HTTP 行为")
+    parser = argparse.ArgumentParser(description="检查本机容器端口的十项真实 HTTP 行为")
     parser.add_argument("--port", required=True, type=port_number, help="宿主机端口，1–65535")
     args = parser.parse_args()
     try:
