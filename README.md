@@ -1,12 +1,14 @@
 # RepoPilot
 
-RepoPilot 当前是一个基于 FastAPI 的 Python 后端，支持健康检查、提交 Python 源码审查、GitHub 公开仓库元数据查询、公开仓库中单个 Python 文件的静态审查，以及公开 PR 的只读概览。PR（Pull Request，合并请求）用于提议将一组提交合入目标分支；当前概览仅返回其身份、状态、分支、提交 SHA 和变更数量，不读取修改文件、不审查 diff、不判断可合并性，也不发布评论。源码审查使用 Python 标准库 AST（抽象语法树，即代码的结构化表示），GitHub 查询和文件读取使用 HTTPX。
+RepoPilot 当前是一个基于 FastAPI 的 Python 后端，支持健康检查、提交 Python 源码审查、GitHub 公开仓库元数据查询、公开仓库中单个 Python 文件的静态审查、公开 PR 的只读概览和单页变更文件列表。PR（Pull Request，合并请求）用于提议将一组提交合入目标分支；概览返回身份、状态、分支、提交 SHA 和变更数量，文件列表只返回一页文件元数据。PR 功能不下载文件源码、不审查 diff、不判断可合并性，也不发布评论。源码审查使用 Python 标准库 AST（抽象语法树，即代码的结构化表示），GitHub 查询和文件读取使用 HTTPX。
 
 项目的长期目标是发展为面向 GitHub 的 AI 代码审查助手。当前尚未接入 AI；调用文件审查接口时，只读取默认分支中指定的一个受限 Python 文件，不扫描整个仓库。源码只作为 AST 分析的数据，不执行、导入或保存。
 
 仓库已提供 GitHub Actions 持续集成配置。此前已核实：Day 5 提交已推送，Backend CI #4 成功，并在 2026-10-30 完成最小应用实网验收，详见下文历史记录。Day 6 已分离依赖声明、生成四份平台锁、完成 Windows 与 Debian Linux 全新环境验收，相关变更已提交并推送，Ubuntu 开发环境的 Backend CI #5 也已成功。Day 7 第一批在全新 Windows 运行环境中完成本机 HTTP 监听验收；Day 8 第一、第二批进一步完成 Docker 本地构建和容器端口映射链路验收，均覆盖健康检查、文档和源码审查。Day 9 新增独立 Docker checks job 和标准库真实 HTTP 冒烟脚本，保留原有 Backend checks；相关变更已提交并推送，两个 job 已在提交 `130d64ff90caf7dac2e7e78f4731f07f6d757315` 的 Backend CI #9 中通过。
 
 Day 10 已实现 PR 请求/响应模型、受限客户端、同步路由及离线测试，将业务路由扩展为五个，冒烟脚本扩展为十项。此前已完成两平台锁定开发环境全量检查和本地运行镜像验收，随后修复 PR 链接的 ASCII 身份核对并完成定向回归。**Day 10 已随提交 `9ca16fe01532966fd1ce3dc44639b9272ca49c53` 推送，Backend CI #11 的 Backend checks 和 Docker checks 均成功。** 后续以文档提交 `81cd1be97979dc29ec1bddf5cf26ffef4776405b` 为基线，完成 `psf/requests#4` 的有效 PR 最小实网验收。各次结果按下文记录的版本和环境保留。
+
+**Day 11 已在本地实现单页 PR 文件列表，当前有六个业务路由、十一项冒烟。** Windows 锁定开发环境、Debian 全新锁定开发环境均通过 1756 项测试，当前源码构建的运行镜像也通过十一项真实 HTTP 检查。源码基线为 `6e46e9793f4297843ef09394d659d37e0e898e18` 加九项未提交改动，本批 README 同步后累计十项；尚未提交、推送或验证 Day 11 远程 CI，有效 PR 文件列表实网也尚未验证。
 
 本页按各次验收的提交和环境记录结果。Day 10 第八批当时只更新文档，其整理的修复前本地验收基于 `27d0bdc4842c37a2bf735ad629ca77016667ff89` 加当时八项未提交改动，该旧 HEAD 本身不包含 Day 10 功能。Day 4—Day 9 的历史提交绑定、数字、失败和警告分别保留。有效 PR 的真实上游请求另见下文最小实网验收记录。
 
@@ -83,7 +85,7 @@ Day 10 已实现 PR 请求/响应模型、受限客户端、同步路由及离�
 ### Day 9：Docker CI 配置、本地流程与远程 CI 验收
 
 - `.github/workflows/backend-ci.yml` 保留原 Backend checks，新增独立 Docker checks；两个 job 没有 `needs` 依赖。
-- 当时新增 `backend/scripts/smoke_http.py`，仅用 Python 标准库请求固定的 `127.0.0.1` 端口，验证九项 HTTP 行为；不导入应用或使用模拟传输，当时不调用 GitHub 业务接口。当前 Day 10 版本另增加了非法 PR 编号检查。
+- 当时新增 `backend/scripts/smoke_http.py`，仅用 Python 标准库请求固定的 `127.0.0.1` 端口，验证九项 HTTP 行为；不导入应用或使用模拟传输，当时不调用 GitHub 业务接口。Day 10 另增加非法 PR 编号检查，Day 11 再增加非法文件页码检查。
 - Docker job 从 `backend` 构建，按实际镜像 ID 启动默认服务，核对容器归属、配置及动态端口，再运行冒烟脚本；由有时限的 `always()` 步骤收集日志、停止和普通删除本批容器。
 - 已有本地记录包括一次缓存构建、Entrypoint 键缺失失败及单行修复、九项真实 HTTP 检查、退出码 23 的普通失败收尾，以及 HTTP 500 反例。
 - 原反例收尾的端口探测超时，验收器最终退出 1；后续独立补查仅确认补查时无监听，不改写原退出码或推断超时原因。详细顺序和结果见下文 Day 9 记录。
@@ -95,9 +97,18 @@ Day 10 已实现 PR 请求/响应模型、受限客户端、同步路由及离�
 - 客户端新增 `fetch_pull_request`：输入验证后，仅一次 GET 固定的 GitHub PR API；有界读取原始正文，验证编码、字段和 PR 身份，显式映射十四个字段，不执行 AST 审查。
 - 新增同步 `POST /api/v1/github/pull-request`，复用每次请求独立创建、关闭客户端的依赖，只转换七类明确查询异常；原四个业务路由保持兼容。
 - 三份 PR 测试覆盖模型、客户端及 API；新增 `test_smoke_http.py`，通过临时回环 HTTP 服务和真实脚本子进程验证冒烟成功与失败，不导入应用或访问 GitHub。
-- 当前冒烟检查五个业务路由，并新增 PR 编号 `0` 返回 422 且错误位置精确为 `["body","pull_number"]` 的检查，共十项；不执行有效上游 GitHub 查询。
+- 当时冒烟检查五个业务路由，并新增 PR 编号 `0` 返回 422 且错误位置精确为 `["body","pull_number"]` 的检查，共十项；不执行有效上游 GitHub 查询。
 - Windows / CPython 3.14.6 与 Debian / CPython 3.12.16 的 1309 项全量验收及本地运行镜像属于 ASCII 修复前记录。修复后完成定向回归，并随上述提交推送，由 Backend CI #11 验证两个 job，详见下文。
 - 随后复用 Windows 锁定开发环境，经现有应用路由实际读取公开 PR `psf/requests#4`，返回 200，十四个字段与连接器参考结果一致，前后健康检查均通过。
+
+### Day 11：PR 变更文件列表与十一项冒烟
+
+- 新增 `GitHubPullRequestFilesRequest`、`GitHubPullRequestFile`、`GitHubPullRequestFilesResponse` 和严格页码验证，复用仓库 URL、PR 编号规则；页码默认 1，范围 1–100，每页固定 30 项。
+- 新增 `fetch_pull_request_files`，只发一次固定 GET，流式限制全部正文为 1 MiB，显式映射文件元数据，不自动翻页、不查询概览、不访问下载或分页链接。
+- 新增同步 `POST /api/v1/github/pull-request/files`，只转换七类明确查询异常；旧五个路由保持兼容，既有 OpenAPI 精确断言同步为六个路由。
+- 新增模型、客户端、API 三份离线测试，分别为 208、160、65 项。标准库冒烟扩展为十一项，对应脚本测试扩展为 26 项，包含页码 0 的精确 422 位置及 `python -O` 反例。
+- 两平台锁定开发环境均通过 1756 项测试；Windows app 为 599 条语句，Debian 为 617 条语句，均为 100% 行覆盖率，未收集分支覆盖率。运行镜像的十一项本机 HTTP 检查通过，详见 Day 11 记录。
+- 以上改动尚未提交或推送，远程 CI 与有效 PR 文件列表实网另待验收；本批仅同步 README，没有重新执行已有验收。
 
 以上为已有功能、配置与已完成的验收；后面的“下一阶段计划”尚未实施。
 
@@ -142,6 +153,9 @@ RepoPilot/
         ├── test_github_pull_request_schemas.py
         ├── test_github_pull_request_client.py
         ├── test_github_pull_request_api.py
+        ├── test_github_pull_request_files_schemas.py
+        ├── test_github_pull_request_files_client.py
+        ├── test_github_pull_request_files_api.py
         ├── test_smoke_http.py
         └── test_reviewer.py
 ```
@@ -159,11 +173,11 @@ RepoPilot/
 - `backend/pyproject.toml`：保存 Ruff、pytest 和 mypy 配置；覆盖率通过 pytest 命令行参数启用。
 - `backend/app/__init__.py`：将 `app` 目录标识为 Python 包，便于导入其中的模块。
 - `backend/app/main.py`：FastAPI 应用入口，负责接收请求和组织响应。
-- `backend/app/schemas.py`：请求和响应模型、仓库 URL、相对 Python 文件路径和严格 PR 编号验证。
-- `backend/app/github_client.py`：GitHub 同步 HTTP 客户端、元数据七字段映射、受限文件读取与解码、受限 PR 概览及十四字段映射、客户端异常和连接生命周期管理。
+- `backend/app/schemas.py`：请求和响应模型、仓库 URL、相对 Python 文件路径、严格 PR 编号和文件列表页码验证。
+- `backend/app/github_client.py`：GitHub 同步 HTTP 客户端、元数据七字段映射、受限文件读取与解码、受限 PR 概览及十四字段映射、单页 PR 文件元数据读取、客户端异常和连接生命周期管理。
 - `backend/app/reviewer.py`：解析源码、处理解析异常、调用规则收集器，并对结果排序。
 - `backend/app/rules.py`：三个独立节点规则及只遍历一次 AST 的收集器。
-- `backend/scripts/smoke_http.py`：仅用标准库从宿主机请求本机监听端口，等待就绪并检查十项 HTTP 行为，包含五路由 OpenAPI 和非法 PR 编号验证；通过显式条件和异常报告失败，不依赖可被 `python -O` 禁用的 `assert`。
+- `backend/scripts/smoke_http.py`：仅用标准库从宿主机请求本机监听端口，等待就绪并检查十一项 HTTP 行为，包含六路由 OpenAPI、非法 PR 编号和非法文件页码验证；通过显式条件和异常报告失败，不依赖可被 `python -O` 禁用的 `assert`。
 - `backend/tests/test_api.py`：验证接口、审查规则、输入边界及源码不被执行。
 - `backend/tests/test_github_schemas.py`：验证仓库 URL 安全规则及请求、响应模型。
 - `backend/tests/test_github_client.py`：使用模拟响应验证请求目标、超时配置、上游错误、数据校验及连接关闭。
@@ -173,8 +187,11 @@ RepoPilot/
 - `backend/tests/test_github_file_api.py`：使用真实客户端和审查器搭配模拟上游，验证文件路由衔接、输入验证、错误映射、源码不执行、资源释放及旧接口回归。
 - `backend/tests/test_github_pull_request_schemas.py`：离线验证严格编号、URL 原值保留、十四字段类型与必填约束、Unicode、SHA 和序列化。
 - `backend/tests/test_github_pull_request_client.py`：用 MockTransport 和可追踪响应流验证单次固定请求、身份映射、1 MiB 边界、状态分类、编码和资源释放。
-- `backend/tests/test_github_pull_request_api.py`：用真实应用、客户端及模拟上游验证 PR 路由、七类固定错误、422 脱敏、非预期异常、生产依赖生命周期和五路由 OpenAPI。
-- `backend/tests/test_smoke_http.py`：启动临时标准库回环服务及真实脚本子进程，记录十项实际请求，验证缺路由、错误方法、错误状态/位置及 `python -O` 失败反例，并检查线程和端口收尾。
+- `backend/tests/test_github_pull_request_api.py`：用真实应用、客户端及模拟上游验证 PR 路由、七类固定错误、422 脱敏、非预期异常、生产依赖生命周期和六路由 OpenAPI。
+- `backend/tests/test_github_pull_request_files_schemas.py`：离线验证严格页码、默认值、单页长度、文件元数据类型与序列化。
+- `backend/tests/test_github_pull_request_files_client.py`：用未预读的模拟流验证一次固定请求、1 MiB 限制、元数据映射、错误脱敏和响应关闭。
+- `backend/tests/test_github_pull_request_files_api.py`：用真实应用、客户端及模拟上游验证文件列表路由、六路由 OpenAPI、七类错误、生产依赖关闭及非预期异常。
+- `backend/tests/test_smoke_http.py`：启动临时标准库回环服务及真实脚本子进程，记录十一项实际请求，验证缺路由、错误方法、错误状态/位置及 `python -O` 失败反例，并检查线程和端口收尾。
 - `backend/tests/test_reviewer.py`：直接验证审查器的输出顺序、行号及不执行源码的约定。
 
 ## 环境准备
@@ -289,7 +306,7 @@ Linux：
 - 健康检查：`http://127.0.0.1:8000/health`
 - 可交互的接口文档：`http://127.0.0.1:8000/docs`
 
-打开 `/docs` 不会自动请求 GitHub；在页面提交合法的仓库元数据、文件审查或 PR 概览请求会触发真实上游请求。非法输入在验证阶段拒绝，例如 PR 编号 `0` 返回 422，不调用 PR 查询方法；这不表示框架一定不会先构造依赖客户端。上面是保留的开发启动说明，本批没有执行。Day 5 最小实网验收采用进程内接口流程，当时没有启动监听服务；后续本机及容器 HTTP 验收分别记录于下文。
+打开 `/docs` 不会自动请求 GitHub；在页面提交合法的仓库元数据、文件审查、PR 概览或 PR 文件列表请求会触发真实上游请求。非法输入在验证阶段拒绝，例如 PR 编号 `0` 返回 422，不调用 PR 查询方法；这不表示框架一定不会先构造依赖客户端。上面是保留的开发启动说明，本批没有执行。Day 5 最小实网验收采用进程内接口流程，当时没有启动监听服务；后续本机及容器 HTTP 验收分别记录于下文。
 
 ### Windows 本地监听验收：手动复用示例
 
@@ -407,7 +424,7 @@ try {
 
 客户端明确设置超时、绕过代理并禁止自动重定向。请求失败时也会关闭客户端；仍需执行下面的容器日志与停止清理步骤。这个健康检查示例不调用 GitHub 业务路由。
 
-### 执行当前十项 HTTP 冒烟（手动示例）
+### 执行当前十一项 HTTP 冒烟（手动示例）
 
 在本次容器仍运行时，可使用版本已核实的主机 Python 绝对路径，从真实 `backend` 目录运行仓库原版脚本。以下命令只作说明，本批没有执行；不加载外部 CDN，不提交有效 GitHub 查询：
 
@@ -418,7 +435,7 @@ Set-Location -LiteralPath $backendDir
 if ($LASTEXITCODE -ne 0) { throw '冒烟失败，保存输出后继续收集日志并清理本批容器。' }
 ```
 
-当前十项为：初始健康、Swagger HTML、五路由 OpenAPI、正常源码、print、语法错误、空 code、源码不执行、非法 PR 编号、最后健康。新增请求只向本机 PR 路由提交 `{"repository_url":"https://github.com/example/repo","pull_number":0}`，要求 422、非空错误数组及精确字段位置；不会调用 `fetch_pull_request` 或上游 GitHub。脚本仅依赖标准库，不能把其模拟服务测试通过写成真实应用或容器已通过；真实容器记录另列于 Day 10 验收节。
+当前十一项为：初始健康、Swagger HTML、六路由 OpenAPI、正常源码、print、语法错误、空 code、源码不执行、非法 PR 编号、非法 PR 文件页码、最后健康。两个 PR 请求分别提交 `{"repository_url":"https://github.com/example/repo","pull_number":0}` 和 `{"repository_url":"https://github.com/example/repo","pull_number":1,"page":0}`，要求 422、非空错误数组，且错误位置分别精确为 `["body","pull_number"]`、`["body","page"]`；不会调用两个 PR 查询方法或上游 GitHub。脚本仅依赖标准库，其模拟服务测试与真实应用/容器验收分别记录；当前十一项真实容器结果见 Day 11 验收节。
 
 ### 保存日志、停止并核对后删除
 
@@ -457,7 +474,7 @@ docker --context desktop-linux container rm $containerId
 if ($LASTEXITCODE -ne 0) { throw '本批容器删除失败，先检查实际状态。' }
 ```
 
-保留本地镜像供后续使用，不删除其他容器、镜像、卷或构建缓存。以上是手动使用步骤，不是自动验收脚本的逐字重现；已有构建、HTTP 与停止结果分别列于 Day 8 和 Day 10 验收记录。
+保留本地镜像供后续使用，不删除其他容器、镜像、卷或构建缓存。以上是手动使用步骤，不是自动验收脚本的逐字重现；已有构建、HTTP 与停止结果分别列于 Day 8、Day 10 和 Day 11 验收记录。
 
 ## 接口与审查规则
 
@@ -664,7 +681,7 @@ https://api.github.com/repos/{owner}/{repo}/pulls/{pull_number}
 - 上游 `number` 必须是真正整数且等于请求编号。模型中的 `html_url` 只要求非空，客户端先要求该链接只含 ASCII 字符，再与 `https://github.com/{owner}/{repo}/pull/{pull_number}` 作完整、大小写不敏感比较，不 strip。用户信息、端口、查询、片段、额外路径、末尾斜杠、百分号编码或反斜杠均不能混入。返回原 `html_url`，不请求它。标题和分支名继续支持 Unicode。
 - 成功、超限、状态错误和读取异常时，响应流均由上下文管理释放；每次 API 请求创建的客户端也由已有依赖关闭，不创建模块级共享客户端。
 
-这个 1 MiB 限制只属于 PR 方法，不替代文件接口的 HTTP 正文、Base64 或源码限制。仓库元数据方法仍没有相同的流式正文上限。
+这个 1 MiB 限制属于 PR 概览方法；PR 文件列表有单独的同值上限，二者都不替代文件审查接口的 HTTP 正文、Base64 或源码限制。仓库元数据方法仍没有相同的流式正文上限。
 
 #### PR 错误响应
 
@@ -687,6 +704,100 @@ PR 路由只转换查询调用阶段的下面七类具体异常，固定说明�
 200 和其余 403 才受限读取正文。403 的合法 JSON 对象中，字符串 `message` 包含 `api rate limit` 或 `secondary rate limit`（忽略大小写）时为限流；其他合法对象归为普通拒绝。**需要解析的 403 正文若是无效 JSON、非对象、无效 UTF-8、不支持的内容编码或超过上限，仍是上游异常 502**，不能笼统写成普通拒绝或限流。
 
 PR 正文超限、字段无效、编号或链接身份不符均为 **502**，不是文件业务限制的 422。HTTPX 超时和其他请求异常分别转换为 504、502，范围覆盖连接、流式读取和上下文退出。路由不捕获客户端基类、`ValueError`、文件专用异常或所有程序异常；在查询的 `try/except` 外返回模型，不把 FastAPI 响应验证或其他程序错误包装成查询/文件下载业务错误，也不泄露底层异常文本或上游正文。
+
+### POST /api/v1/github/pull-request/files
+
+读取一个公开 PR 的**一页变更文件元数据**，不读取这些文件的源码或执行审查。请求使用 `GitHubPullRequestFilesRequest`：
+
+| 字段 | 约束 |
+| --- | --- |
+| `repository_url` | 必填，复用仓库主页 URL 的严格规则，保留合法原字符串；不接收完整 PR URL |
+| `pull_number` | 必填，真正整数，范围 1–2147483647，拒绝布尔值、浮点数和数字字符串 |
+| `page` | 可省略，默认 1；真正整数，范围 **1–100**，拒绝布尔值、浮点数、数字字符串和 null |
+
+页码上限是本项目的策略。每页固定 **30 项**，不能提交 `per_page`、Token、API 地址或其他额外字段。以下请求和响应是**模拟示例**，没有访问示例仓库：
+
+```json
+{
+  "repository_url": "https://github.com/example-owner/example-repo",
+  "pull_number": 42,
+  "page": 1
+}
+```
+
+HTTP 200 返回 `GitHubPullRequestFilesResponse`，顶层恰好五个必填字段：
+
+```json
+{
+  "repository_url": "https://github.com/example-owner/example-repo",
+  "pull_number": 42,
+  "page": 1,
+  "per_page": 30,
+  "files": [
+    {
+      "filename": "src/example.py",
+      "status": "modified",
+      "additions": 4,
+      "deletions": 2,
+      "changes": 6,
+      "previous_filename": null
+    },
+    {
+      "filename": "文档/新 文档.md",
+      "status": "renamed",
+      "additions": 1,
+      "deletions": 0,
+      "changes": 1,
+      "previous_filename": "文档/旧 文档.md"
+    }
+  ]
+}
+```
+
+`repository_url`、`pull_number`、`page` 来自已验证请求；`per_page` 必须为严格整数 30。`files` 是保持上游顺序的数组，允许空数组，最多 30 项。上游数组没有用于核对 PR 身份的独立字段，客户端不额外查询概览。
+
+| 每个文件的字段 | 类型及约束 |
+| --- | --- |
+| `filename` | 必填非空字符串，原样保留；支持 Unicode、空格和非 Python 扩展名 |
+| `status` | 必填，仅 `added`、`removed`、`modified`、`renamed`、`copied`、`changed`、`unchanged` |
+| `additions` | 必填严格非负整数 |
+| `deletions` | 必填严格非负整数 |
+| `changes` | 必填严格非负整数，不推断它一定等于前两项之和 |
+| `previous_filename` | 可省略或为 null；存在非空字符串时原样保留，支持 Unicode，响应中省略值统一为 null |
+
+文件名只作元数据，不套用 Day 5 的 ASCII、小写 `.py` 路径规则，也不当成本地路径或下载参数。改名状态不要求旧文件名一定存在；不自动补齐关系、计算计数或纠正上游字段。响应不返回 `patch`、`sha`、下载链接、源码或审查结果。
+
+#### 单页请求与正文限制
+
+`fetch_pull_request_files(repository_url, pull_number, page=1)` 在网络调用前验证三个输入，只发送一次 GET：
+
+```text
+https://api.github.com/repos/{owner}/{repo}/pulls/{pull_number}/files?per_page=30&page={page}
+```
+
+不先查询元数据或 PR 概览，不跟随 `Link` 自动翻页，也不访问 `raw_url`、`contents_url` 或其他响应链接。满 30 项不代表一定有下一页，空页也不提供总数或完整性承诺；没有 `has_next`、总数或游标字段。各页未绑定固定提交快照，不保证 PR 变化时的跨页一致性。
+
+需要读取的原始正文最多 **1,048,576 字节（1 MiB）**，包括 JSON 结构和最终不返回的 `patch`。逐块读取原始字节，加入缓冲区前检查，超限后停止后续读取，不信任 `Content-Length`。仅本方法发送 `Accept-Encoding: identity`，拒绝非 identity 内容编码，不解压正文。
+
+正文严格按 UTF-8 解码并解析 JSON。成功正文必须是数组，每项必须是对象，必填字段、类型、状态和计数须通过模型验证，两个文件名还必须能严格编码为 UTF-8；孤立代理码点拒绝。无效正文、递归解析错误、超过 30 项或字段无效均归为上游异常，不返回部分成功列表。
+
+#### 文件列表错误响应
+
+输入验证失败返回 HTTP 422，`detail` 为非空数组，仅含 `loc`、`type`、`msg`；页码 0 的位置精确为 `["body","page"]`。不会调用文件列表方法或上游；框架可能先构造依赖客户端，已创建的客户端仍会关闭。
+
+| 客户端异常 | HTTP 状态 | 固定 `detail` |
+| --- | --- | --- |
+| `GitHubNotFoundError` | `404` | `仓库或 PR 不存在或不可公开访问。` |
+| `GitHubRateLimitError` | `503` | `GitHub 请求受到限流，请稍后重试。` |
+| `GitHubForbiddenError` | `502` | `GitHub 拒绝访问该仓库或 PR。` |
+| `GitHubRedirectError` | `502` | `GitHub 返回了重定向，请使用仓库当前的主页地址。` |
+| `GitHubUpstreamError` | `502` | `GitHub 返回了无效或非预期的 PR 文件列表响应。` |
+| `GitHubTimeoutError` | `504` | `GitHub 请求超时。` |
+| `GitHubNetworkError` | `502` | `GitHub 网络请求失败。` |
+
+状态分类沿用 PR 概览：404、429、403 且剩余额度为 0、300–399 及其他非 200/403 状态无需读取正文。其余 403 受限解析为 JSON 对象，用字符串 `message` 中的明确限流信息区分限流和普通拒绝；无效 JSON、非对象、编码不支持或正文超限仍是上游异常。200 则要求文件数组。
+
+正文超限返回 **502**，不是文件审查业务限制的 422。HTTPX 异常转换覆盖连接、读取和上下文退出；响应始终通过上下文管理关闭，客户端仍可复用。路由只转换查询调用阶段的七类具体异常，在处理范围外返回模型，不捕获基类、文件专用异常或所有程序错误，不泄露上游正文与底层异常文本，也不调用 `review_python`。
 
 ### 仓库元数据查询与文件审查的错误响应
 
@@ -746,15 +857,15 @@ PR 正文超限、字段无效、编号或链接身份不符均为 **502**，不
 - **校验原始字符串后再解析。** 拒绝空白、控制字符、百分号编码和反斜杠，防止解析器清理字符后产生歧义。
 - **协议和域名精确匹配。** 仅接受 HTTPS 和 `github.com`，不允许用户信息、显式端口、查询参数或片段，包括空的 `?`、`#`。
 - **路径采用明确的字符规则。** 只允许 `/owner/repo` 和最多一个末尾斜杠。owner 仅允许 ASCII 字母、数字及单个内部连字符；repo 仅允许 ASCII 字母、数字、点、下划线和连字符，不能是独立的 `.` 或 `..`，也不能以 `.git` 结尾（忽略大小写）。
-- **固定 HTTP 请求目标。** 客户端只用已验证的 owner、repo、文件相对路径或严格 PR 编号构造 `/repos/{owner}/{repo}`、`/repos/{owner}/{repo}/contents/{file_path}` 或 `/repos/{owner}/{repo}/pulls/{pull_number}`，完整目标主机始终为 `https://api.github.com`。不请求用户提交的完整 URL，也不访问 `download_url`、PR `html_url` 等上游链接，不接受用户指定的 API 地址、请求头或认证信息。这用于防止 SSRF，即诱导服务器请求任意地址。
+- **固定 HTTP 请求目标。** 客户端只用已验证的 owner、repo、文件相对路径或严格 PR 编号构造 `/repos/{owner}/{repo}`、`/repos/{owner}/{repo}/contents/{file_path}`、`/repos/{owner}/{repo}/pulls/{pull_number}` 或 `/repos/{owner}/{repo}/pulls/{pull_number}/files`，文件列表另传经过验证的页码和固定每页数量，完整目标主机始终为 `https://api.github.com`。不请求用户提交的完整 URL，也不访问 `download_url`、PR `html_url` 等上游链接，不接受用户指定的 API 地址、请求头或认证信息。这用于防止 SSRF，即诱导服务器请求任意地址。
 - **不跟随重定向，保持 TLS 证书验证。** 不访问上游 `Location` 指定的目标。
 - **匿名读取公开信息。** 不需要配置 GitHub Token，也不发送 `Authorization`。匿名请求受到 GitHub API 限额约束，多个调用者可能共享服务器来源 IP 的额度；具体规则以 [GitHub 官方限额文档](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api) 为准。
 - **设置明确超时。** connect 为 3 秒，read、write、pool 各为 5 秒；这些是不同网络阶段的超时，不是整个请求总耗时最多 5 秒。
-- **清理连接和响应流。** 三个 GitHub 路由复用同一依赖管理方式，每次请求创建客户端并在成功或异常结束时关闭；文件和 PR 读取的响应流也通过上下文管理释放。客户端支持 `with`、`close()` 和公开的 `is_closed`；模块导入时不创建长期存活的 HTTP 客户端。
-- **限制错误信息。** 元数据经过响应模型验证，文件经过字段、大小和解码校验，PR 经过有界正文、严格模型和身份核对，明确的查询错误返回固定说明；原始错误正文和底层异常文本不直接透传。
+- **清理连接和响应流。** 四个 GitHub 路由复用同一依赖管理方式，每次请求创建客户端并在成功或异常结束时关闭；文件、PR 概览和文件列表读取的响应流也通过上下文管理释放。客户端支持 `with`、`close()` 和公开的 `is_closed`；模块导入时不创建长期存活的 HTTP 客户端。
+- **限制错误信息。** 元数据经过响应模型验证，文件经过字段、大小和解码校验，PR 概览经过有界正文、严格模型和身份核对，文件列表经过独立正文、数组和元数据校验，明确的查询错误返回固定说明；原始错误正文和底层异常文本不直接透传。
 - **校验文件链接标记但不作绝对保证。** 文件读取拒绝显式链接和子模块标记；Contents API 可能返回仓库内符号链接目标的普通文件内容，因此不能证明原路径一定不是链接。
 
-URL、文件路径和 PR 编号纯验证函数本身不进行 DNS 或 HTTP 请求；仓库、文件或 PR 是否存在、是否可公开访问，需要后续实际 GitHub 响应确认。Python 源码只作为 AST 分析的数据，不执行、导入或保存。
+URL、文件路径、PR 编号和页码纯验证函数本身不进行 DNS 或 HTTP 请求；仓库、文件或 PR 是否存在、是否可公开访问，需要后续实际 GitHub 响应确认。Python 源码只作为 AST 分析的数据，不执行、导入或保存。
 
 ## 当前限制与不支持的功能
 
@@ -763,11 +874,12 @@ URL、文件路径和 PR 编号纯验证函数本身不进行 DNS 或 HTTP 请�
 - **不是完整的 Python 正确性检查。** `PY_SYNTAX` 表示 AST 解析失败，不代表能发现所有编译阶段或运行时错误。注释和普通字符串中的规则名称不会触发问题；字符串插值表达式中的真实调用仍会被遍历。
 - **提示需要结合上下文判断。** `print()` 有时是正常输出；`PY_PRINT` 只是提示，并不自动认定代码有缺陷。
 - **不提供完整安全分析或安全保证。** 当前规则不是完整的漏洞扫描；不会在沙箱中执行源码，也不为每次审查请求启动独立进程。已有源码长度、远程文件字节和文件响应体大小限制，但不能替代完整的 CPU、内存、并发及总耗时资源隔离，提供 Docker 运行方式也不等于已有完整生产防护。
-- **GitHub 范围受限。** 支持公开仓库元数据、默认分支单个 Python 文件读取审查和公开 PR 概览；不读取 PR 文件列表或 diff，不判断可合并性，不支持私有仓库、Token、webhook 或自动发布评论；GitHub Actions 仅负责验证本项目。
-- **GitHub 客户端没有重试、缓存或认证。** 当前也没有调用方鉴权或应用级请求限流；文件有受限响应体和源码配额，PR 有独立 1 MiB 正文上限，元数据尚无相同的流式正文限制，不属于完整生产防护。
+- **GitHub 范围受限。** 支持公开仓库元数据、默认分支单个 Python 文件读取审查、公开 PR 概览和单页变更文件元数据；不审查 PR diff 或下载 PR 文件源码，不判断可合并性，不支持私有仓库、Token、webhook 或自动发布评论；GitHub Actions 仅负责验证本项目。
+- **GitHub 客户端没有重试、缓存或认证。** 当前也没有调用方鉴权或应用级请求限流；文件有受限响应体和源码配额，PR 概览和文件列表各有独立 1 MiB 正文上限，仓库元数据尚无相同的流式正文限制，不属于完整生产防护。
+- **PR 文件列表只是单页元数据。** 每次最多 30 项，页码上限 100 是项目策略；不自动翻页、不声明总数或下一页、不保证跨页快照一致性。原始响应中的 `patch` 计入大小限制，但不返回或审查；文件名也不是经验证的 Python 下载路径。
 - **网络配置固定。** `trust_env=False`，不会自动采用环境代理或自定义证书变量；需要代理或企业证书的环境可能无法直接连接。2026-10-30 已完成最小应用实网验收，但期间也遇到匿名限流和连接超时，不保证所有网络环境或后续请求始终可用；其他机器访问和生产部署仍未验收。
-- **本机监听验收范围有限。** Day 7—Day 9 当时只验证健康、文档及源码审查，未调用当时两个 GitHub 路由。Day 10 十项容器 HTTP 另增加 PR 非法编号的 422，未执行有效上游查询；不能据此声称有效 PR 实网或所有 GitHub 路由已验收，也不能推导其他机器一定不可访问。
-- **CI 验证范围有限。** CI #11 已验证 Day 10 提交 `9ca16fe01532966fd1ce3dc44639b9272ca49c53` 的两个 job，不能自动覆盖后续提交。Day 9 原验收器退出 1 与后续端口补查分别保留。有效 PR 最小实网另有 Windows 进程内接口记录；Ubuntu 原生纯运行环境、镜像发布、其他机器访问和生产部署仍待单独验收。
+- **本机监听验收范围有限。** Day 7—Day 9 当时只验证健康、文档及源码审查，未调用当时两个 GitHub 路由。Day 10 十项容器 HTTP 另增加 PR 非法编号的 422，Day 11 十一项再增加非法文件页码的 422，均未执行有效上游查询；不能据此声称有效 PR 实网或所有 GitHub 路由已验收，也不能推导其他机器一定不可访问。
+- **CI 验证范围有限。** CI #11 已验证 Day 10 提交 `9ca16fe01532966fd1ce3dc44639b9272ca49c53` 的两个 job，不能自动覆盖后续提交；当前 Day 11 未提交改动也没有对应远程 CI 结果。Day 9 原验收器退出 1 与后续端口补查分别保留。有效 PR 最小实网另有 Windows 进程内接口记录；Ubuntu 原生纯运行环境、镜像发布、其他机器访问和生产部署仍待单独验收。
 - **没有 AI 审查。** 不调用 LLM（大语言模型）或付费 AI API，不生成 AI 修复建议。
 - **没有产品前端、数据库或审查记录持久化。** `/docs` 是 FastAPI 提供的接口调试文档。
 
@@ -787,7 +899,7 @@ $reviewResult | ConvertTo-Json -Depth 5
 
 第一个请求应返回 `status: ok`；第二个应返回 `language: python`、`issue_count: 1` 和一条 `PY_PRINT` 提示。也可在 `/docs` 页面直接试用接口。
 
-上面的健康检查和源码提交接口不需要 GitHub 网络。访问 `/docs` 也不会自动查询 GitHub；在文档页面提交合法的元数据、文件审查或 PR 概览请求会发出真实 GitHub 请求。Day 5 最小 GitHub 实网、本机 HTTP 及 Day 10 有效 PR 最小实网分别见下文记录。
+上面的健康检查和源码提交接口不需要 GitHub 网络。访问 `/docs` 也不会自动查询 GitHub；在文档页面提交合法的元数据、文件审查、PR 概览或文件列表请求会发出真实 GitHub 请求。Day 5 最小 GitHub 实网、本机 HTTP 及 Day 10 有效 PR 最小实网分别见下文记录。
 
 ## 运行自动化测试
 
@@ -807,11 +919,13 @@ GitHub 模型测试覆盖合法 URL、伪装域名、路径及字符边界、严
 
 Day 5 的三个文件测试模块进一步覆盖相对 Python 路径、严格模型、文件响应体和源码大小边界、Base64/UTF-8 解码、显式链接标记及流关闭。API 集成测试使用真实客户端和真实审查器，只模拟上游传输，验证一次读取、原样审查、不回显源码、空文件与语法错误，以及下载失败时不进入审查器；含顶层 `raise RuntimeError` 的源码也只作为字符串被解析。
 
-Day 10 的三份 PR 测试进一步覆盖严格编号、十四字段、Unicode 与 SHA、有界流读取、身份核对、状态分类、固定错误文本及响应/客户端关闭；API 测试保留非预期异常和响应验证失败，不把它们伪装成业务错误，并检查五路由 OpenAPI 和旧接口兼容性。
+Day 10 的三份 PR 测试进一步覆盖严格编号、十四字段、Unicode 与 SHA、有界流读取、身份核对、状态分类、固定错误文本及响应/客户端关闭；API 测试保留非预期异常和响应验证失败，不把它们伪装成业务错误，当时检查五路由 OpenAPI 和旧接口兼容性；Day 11 已对该精确断言作最小更新，加入第六个路由。
+
+Day 11 的三份文件列表测试覆盖严格页码、每页 30 项、Unicode 文件名、六字段映射、有界正文、七类错误与关闭路径。API 测试保留真实生产依赖的 `with/yield`，确认每次请求独立创建、关闭客户端，不调用概览、文件下载或源码审查器；新 OpenAPI 测试精确检查六个路由及模型约束。
 
 GitHub 测试阻断真实外部 HTTP 和 DNS；依赖覆盖结束时恢复，资源测试也通过替换构造器的传输层执行生产 `with/yield`，验证每次请求独立创建并关闭客户端。`test_smoke_http.py` 则允许临时标准库回环 HTTP 服务，用 `sys.executable -B` 运行真实脚本子进程，记录实际请求；错误路由、状态或字段位置必须失败，包含 `python -O` 反例。子进程有超时，服务在 `finally` 中关闭并确认线程退出及端口释放。这些模拟服务测试不导入应用，也不验证真实应用、GitHub、DNS、TLS 或部署。
 
-单独运行 `scripts/smoke_http.py` 时需要已启动的本机服务和真实端口；当前检查十项，不使用 TestClient 或 MockTransport，包含非法 PR 编号请求，但不执行有效上游 GitHub 查询。Day 7—Day 9 当时九项脚本的历史结果保持原样；本批未运行测试或脚本。
+单独运行 `scripts/smoke_http.py` 时需要已启动的本机服务和真实端口；当前检查十一项，不使用 TestClient 或 MockTransport，包含非法 PR 编号和非法文件页码请求，但不执行有效上游 GitHub 查询。Day 7—Day 9 当时九项脚本的历史结果保持原样；本批未运行测试或脚本。
 
 新增的解析器异常测试使用 `monkeypatch` 临时模拟失败，避免使用可能耗尽资源的输入来触发异常；这不等于验证了真实资源耗尽场景。
 
@@ -857,7 +971,7 @@ Linux：
 
 当前 CI 测量行覆盖率，未添加 `--cov-branch`，也未设置最低覆盖率门槛。若要单独检查分支覆盖率，可在测试命令中增加 `--cov-branch`；它与行覆盖率是不同的统计口径。
 
-下列 Day 4—Day 9 均为历史记录，其中“本批”等措辞沿用当时的文档批次语境，不表示本次 README 同步重新执行过这些检查。原数字、失败、警告、提交绑定和链接保留。
+下列 Day 4—Day 10 均为历史记录，其中“本批”等措辞沿用当时的文档批次语境，不表示本次 README 同步重新执行过这些检查。原数字、失败、警告、提交绑定和链接保留。
 
 ### Day 4 本地验收记录（历史）
 
@@ -1381,6 +1495,96 @@ sha256:261cab9fad05bc8bc0507b4aa5152ad74d86f9648d1b92f3beeadedce115e884
 
 本次范围覆盖上述 Windows 环境的进程内接口流程及这个公开 PR 的真实 GitHub 上游访问。原生监听或容器端口中的有效 PR 请求、其他网络环境及部署继续按各自范围验收。此记录新增于已有验收之后，Day 10 两平台修复前的 1309 项结果、定向回归和 CI #11 的 1310 项结果仍按原版本保留。
 
+### Day 11 本地实现与验收记录（2026-11-15，尚未提交）
+
+以下均为此前批次已经完成的实际结果，**本批只同步 README，没有重新安装、测试、构建或发送 HTTP 请求**。源码基线为 `day4/github-api` 的 HEAD `6e46e9793f4297843ef09394d659d37e0e898e18` 加九项 Day 11 未提交改动；该旧 HEAD 本身不包含 Day 11 功能。本次文档同步后累计十项改动，尚未提交、推送或验证对应远程 CI。
+
+#### 实现与定向离线检查
+
+| 范围 | 实际结果 |
+| --- | --- |
+| 文件列表模型 | 新增 208 项；四份模型测试回归最终 740 项通过 |
+| 文件列表客户端 | 新增 160 项；五份相关客户端/模型回归 883 项通过 |
+| 文件列表路由 | 新增 65 项；五份 API 回归 307 项通过 |
+| 冒烟脚本 | 对应测试从 13 项扩展为 26 项，全部通过；新增六路由和无效页码验证 |
+| 兼容调整 | 原 PR API 测试只同步测试名称和第六个路由，保留精确路由集合断言 |
+| 质量检查 | 各批相关 Ruff、格式检查及适用的 mypy 检查最终通过；没有改动平台锁或 CI 配置 |
+
+保留以下失败和修正经过：
+
+- 模型批次首次四文件回归为 739 项通过、1 项旧测试临时目录准备错误；通过正常权限流程重新运行后 740 项通过，没有修改旧测试断言。
+- API 首轮持续无输出，已中止，原因未确定。正常权限下跑完后为 62 项通过、1 项 OpenAPI 测试预期失败：FastAPI 输出旧文件名的“字符串或 null”类型，但不输出 `default: null`。仅修正测试预期并补充省略/显式 null 两例，最终 65 项参与上述 307 项回归并通过。受限 CIM 查询失败后，经正常权限补查确认没有残留测试进程。
+- 新增代码的格式问题在允许的文件内修正；格式化前后 AST 比较一致，没有削弱验证规则或断言。Windows 全量验收准备时，辅助快照输出曾被截断，改为保存忽略清单摘要后完成核对；这不是质量检查失败或重跑。
+
+#### Windows 与 Debian 锁定开发环境全量验收
+
+| 项目 | Windows | Debian Linux |
+| --- | --- | --- |
+| 环境方式 | 复用 Day 10 已有 venv，重新核实隔离和锁一致性，未重新安装 | 固定基础镜像中的全新容器、全新 venv，实际严格安装 |
+| 系统、架构 | Windows AMD64 | Debian 12/bookworm，x86_64，glibc 2.36 |
+| Python | CPython 3.14.6 | CPython 3.12.16，GCC 12.2.0 |
+| venv | 既有 Windows 开发环境，`sys.prefix` 与基础解释器不同 | `/tmp/repopilot-day11-dev`，基础解释器前缀 `/usr/local` |
+| 锁与引导包 | Windows 开发锁 39/39 匹配，锁外仅 pip 26.1.2 | Linux 开发锁 39/39 匹配，锁外仅 pip 26.1.2 |
+| 隔离 | 未启用系统或用户 site-packages，无外部发行包 | 同左，uvloop 0.23.0 存在，无 pip-tools |
+| `pip check` | 退出 0，无损坏依赖 | 退出 0，无损坏依赖 |
+| Ruff | 退出 0，`All checks passed!` | 同左 |
+| 格式检查 | 退出 0，`22 files already formatted` | 同左 |
+| mypy | 退出 0，6 个源文件通过 | 同左 |
+| pytest | **1756 passed in 22.49s** | **1756 passed in 30.41s** |
+| app 行覆盖率 | **599 条语句、0 条未覆盖、100%** | **617 条语句、0 条未覆盖、100%** |
+
+两平台四项全量质量检查均只运行一次并通过，pytest 未报告失败、跳过项或警告。覆盖率只统计 `app` 的行，未收集分支覆盖率；不推测两平台语句数差异的原因，也不把 100% 解释为所有安全边界已被证明。
+
+Linux 使用 Docker Desktop `desktop-linux`、Engine 29.8.0 和固定基础镜像 `python@sha256:e697c81897302a4c4333bade000d98038fbb21eb064f8ee1fd42d02ebcd9d337`，镜像当时已在本地，没有拉取或构建。实际完整 Python 版本为 `3.12.16 (main, Oct 28 2026, 02:01:35) [GCC 12.2.0]`。项目只读挂载，35 个项目文件在容器中也核对了字节哈希。
+
+Linux 从官方 PyPI 使用 `--require-hashes --only-binary=:all:` 安装开发锁，核对安装报告中的 wheel 来源、版本及 SHA-256。安装命令执行一次，耗时 **1195.398 秒**；期间 uvloop 下载出现超时、临时 DNS 解析失败及 pip 内部续传，原警告保留，没有重启整套安装或改动网络配置。安装后断开外部网络，inspect 网络端点为 `{}`，接口仅 `lo`，随后才运行四项检查。
+
+Linux 临时容器 `89fc406e2204b36e81141372d87ac05c88623178aedb9e6847bd5596a084f54d` 已正常停止，停止命令退出 0、耗时 0.269 秒；容器为 exited、ExitCode=0、OOMKilled=false，普通删除及无残留查询通过。受限环境首次 Docker 管道读取被拒绝，经正常权限流程核对成功；没有绕过审批或操作其他资源。
+
+记录保留在 Windows 主机的项目外目录：`%TEMP%/RepoPilot-Day11-WindowsValidation-a94bbf5676124a90af6d197e7f56a194` 与 `%TEMP%/RepoPilot-Day11-LinuxValidation-k4j_1sxb`，包含质量日志、覆盖率及 Linux 安装报告。Linux 容器和其中的 venv 已删除。
+
+#### 当前源码运行镜像与十一项真实 HTTP
+
+本次使用同一源码基线加九项未提交改动，以 `backend` 为构建上下文，Linux AMD64 为目标。Docker CLI/Engine 29.8.0，buildx 0.37.0。实际只构建一次，退出 0，耗时 **102.127 秒**；venv、运行锁及依赖安装层命中缓存，应用源码复制层实际执行，因此本次构建不另作为全新依赖安装验收。
+
+| 项目 | 实际结果 |
+| --- | --- |
+| Build IID 与实际镜像 ID | 均为 `sha256:eff459ae3d161fd1eff436b5d54d01a71bc86f6577790798a3b46bb94f02c26b`，镜像保留 |
+| 本地标签 | `repopilot-day11-runtime:local-1b4a24dba6374e3db0b7256a77f274d8` |
+| 系统与解释器 | Debian 12、x86_64、glibc 2.36，CPython 3.12.16；解释器及 `sys.prefix` 为 `/opt/venv` |
+| 身份与启动 | UID/GID 为 10001，默认 CMD/Entrypoint、用户 `10001:10001` 和工作目录 `/app` 保持一致，Uvicorn 为容器 PID 1 |
+| 包与内容 | 23 个运行锁包逐项匹配，锁外仅 pip 26.1.2，无开发专用包；六个应用源码文件及运行锁的字节哈希匹配 |
+| 应用来源 | `app.main` 来自 `/app/app/main.py` |
+| 容器配置 | bridge 网络、无挂载，唯一映射为 `127.0.0.1:54255 → 8000/tcp` |
+| `pip check` | 退出 0，无损坏依赖；保留 `/.cache/pip` 不可写、自动禁用缓存的警告，没有修改镜像消除它 |
+| HTTP 客户端 | Windows CPython 3.14.6 直接运行仓库原版标准库脚本，一次执行，退出 0、耗时 0.838 秒 |
+
+十一项均经宿主机动态端口访问真实 Uvicorn，没有使用 TestClient 或模拟传输；就绪首次健康检查通过，未出现失败探测：
+
+| 场景 | HTTP 状态 |
+| --- | --- |
+| 初始健康检查 | 200 |
+| Swagger HTML，未加载 CDN | 200 |
+| 六路由 OpenAPI | 200 |
+| 正常源码 | 200 |
+| print 规则 | 200 |
+| 非法语法 | 200，返回 PY_SYNTAX |
+| 空 code | 422 |
+| 源码不执行 | 200 |
+| PR 编号 0 | 422，位置为 `["body","pull_number"]` |
+| PR 文件页码 0 | 422，位置为 `["body","page"]` |
+| 最后健康检查 | 200 |
+
+本批容器 `9de9e6868f9a20f3e91c0b2acf729de70eae66b5d8dd609d9f16b219206d3487` 已由 finally 正常收尾。`docker stop -t 10` 退出 0，耗时 **0.839 秒**；容器自身为 Running=false、Status=exited、ExitCode=0、OOMKilled=false。日志含 `Application shutdown complete` 和 `Finished server process`，普通删除及残留检查通过。Windows 监听表确认端口 54255 的监听数量为 0，没有把连接超时当作释放证据。没有强制删除、推送镜像或清理其他 Docker 资源。
+
+运行记录位于项目外的 `%TEMP%/RepoPilot-Day11-RuntimeHTTP-qfer5vhn`，包含构建、镜像/容器 inspect、内容核对、HTTP、停止和监听表记录。该镜像来自旧 HEAD 加未提交改动，不能把旧 SHA 自身写成包含 Day 11 功能。
+
+#### 当前范围与待验收事项
+
+以上两平台及运行镜像批次前后，35 个项目文件的集合、大小和 SHA-256 均未变，5393 项忽略文件清单未变，暂存区为空，分支及 HEAD 不变，没有在项目内新增缓存或报告。本批随后仅修改 README，其他文件保留原样。
+
+本地自动化与十一项容器 HTTP 已通过；有效 PR 文件列表的真实 GitHub 请求、对应新提交的 Ubuntu 远程 CI、镜像发布、其他机器访问及生产部署仍未验证。Day 10 的有效 PR 概览实网和 CI #11 继续绑定原记录，不能替代这些 Day 11 范围。下一步先只读审阅累计十项差异，再安排提交、推送及完整 SHA 对应的两个 CI job 核对。
+
 ## Ruff 代码质量检查与格式检查
 
 先安装对应平台的开发锁。在 `backend` 目录运行代码质量检查，以下为 Windows 命令，Linux 将解释器路径换为 `.venv/bin/python`：
@@ -1441,7 +1645,7 @@ Docker job 总时限为 **20 分钟**，显式设置 Bash 和默认工作目录 
 | 镜像身份 | 从构建 IID 核实实际本地镜像 ID，保存于 `RUNNER_TEMP` 的本次状态目录；按该 ID 启动，不使用历史镜像 ID |
 | 容器启动 | `--pull=never`、唯一名称及 `io.repopilot.ci-owner` 归属标签、`--cidfile`、bridge 网络，仅动态发布 `127.0.0.1::8000/tcp`；保留默认 CMD、用户和工作目录，无挂载，不使用 `--rm` |
 | 配置核对 | 检查完整 ID、名称、归属标签、镜像 ID、用户 `10001:10001`、工作目录 `/app`、默认 CMD/Entrypoint、无挂载及唯一端口映射，从实际 inspect 读取并校验宿主机端口 |
-| HTTP 冒烟 | 在 `backend` 执行 `python -B scripts/smoke_http.py --port <实际宿主机端口>`；步骤时限 2 分钟，读取当前提交的十项脚本，包含非法 PR 编号请求，不执行有效上游 GitHub 查询 |
+| HTTP 冒烟 | 在 `backend` 执行 `python -B scripts/smoke_http.py --port <实际宿主机端口>`；步骤时限 2 分钟，读取对应版本的脚本；当前工作区为十一项，包含非法 PR 编号和非法文件页码，不执行有效上游 GitHub 查询；Day 11 远程执行尚未验证 |
 | 日志与清理 | 独立 `if: always()` 步骤，时限 3 分钟，工作目录改为 `${{ runner.temp }}`，不依赖源码目录存在；核对本次容器归属，收集停止前后日志，执行 `docker stop -t 10`，读取停止状态后普通删除本批已停止容器 |
 
 冒烟脚本只允许端口 `1–65535`，目标主机固定为 `127.0.0.1`；使用 `http.client` 建立真实 HTTP 连接，不使用环境代理或自动跟随重定向，连接在成功或异常时关闭。连接和读写操作设置最长 5 秒超时，就绪探测按剩余期限收紧，就绪等待最多 45 秒；仅就绪探测有限重试，业务响应不符合预期立即非零退出，逐项输出检查名称、状态码和结果。
@@ -1450,7 +1654,7 @@ Docker job 总时限为 **20 分钟**，显式设置 Bash 和默认工作目录 
 
 构建阶段需要访问基础镜像源和 PyPI；HTTP 场景仅访问本机端口，不加载外部 CDN。当前脚本会调用 PR 业务路由的非法输入边界，但不执行有效上游 GitHub 查询，因此不能将整个 job 称为完全断网验收。没有镜像发布步骤。
 
-**Day 9 当时的 Docker 配置和九项脚本随提交 `130d64ff90caf7dac2e7e78f4731f07f6d757315` 推送，并通过 Backend CI #9 的两个 job。** 当前工作流文件没有因 Day 10 改动，但会调用仓库相应版本的脚本。Day 10 的十项脚本已随提交 `9ca16fe01532966fd1ce3dc44639b9272ca49c53` 推送，两个 job 均在 Backend CI #11 中成功。旧 CI #9/#10 仍只对应其自身提交。本批仅依据已有记录同步 README，没有修改 CI、重新查询远程或执行验收。
+**Day 9 当时的 Docker 配置和九项脚本随提交 `130d64ff90caf7dac2e7e78f4731f07f6d757315` 推送，并通过 Backend CI #9 的两个 job。** 工作流文件没有因 Day 10 或 Day 11 改动，会调用仓库相应版本的脚本；当前工作区的十一项脚本尚未提交，不能沿用历史 CI 的成功结论。Day 10 的十项脚本已随提交 `9ca16fe01532966fd1ce3dc44639b9272ca49c53` 推送，两个 job 均在 Backend CI #11 中成功。旧 CI #9/#10 仍只对应其自身提交。本批仅依据已有记录同步 README，没有修改 CI、重新查询远程或执行验收。
 
 **此前 Day 4 远程验收记录：** 提交 `d584a95d48281ec19fa3429f90378366f2081c88` 已推送，Backend CI 成功，见[历史运行记录](https://github.com/tiezhi7/RepoPilot/actions/runs/40859087524)。该链接只代表 Day 4；Day 5 的成功运行是上文另列的 Backend CI #4。**本批文档同步未访问或重新查询这些运行。** CI 成功本身不能替代应用实网验收，后者按上文记录的场景单独完成。
 
@@ -1460,11 +1664,14 @@ Day 4、Day 5 和 Day 6 的远程结果分别绑定各自历史提交。Day 6 �
 
 ## 下一阶段计划（尚未实施）
 
-Day 4—Day 9 的历史提交、CI 和验收继续按各自记录保留，尤其 Day 9 原验收器退出 `1` 与后续端口补查仍分别记录。Day 10 已完成 PR 概览、五路由/十项冒烟、修复前两平台全量及本地镜像验收、ASCII 修复与定向回归、指定 SHA 的 CI #11 以及有效 PR 最小实网验收。后续按独立范围安排。
+Day 4—Day 10 的历史提交、CI 和验收继续按各自记录保留，尤其 Day 9 原验收器退出 `1` 与后续端口补查仍分别记录。Day 11 单页文件列表、六路由/十一项冒烟、两平台锁定开发环境和当前运行镜像的本地验收已完成，当前累计十项改动尚未提交、推送或取得对应远程 CI；本批仅同步文档。
 
-1. 如需验证 Ubuntu 原生纯运行环境，另建干净环境仅安装运行锁并独立验收，不能以 39 包开发环境或 Debian 容器代替。
-2. 镜像发布、其他机器访问/访问限制和生产部署分别确定范围并授权验收，不从本机 `127.0.0.1`、离线测试或历史 CI 推导通过。
+1. 先只读审阅完整差异，三个未跟踪测试文件须单独完整阅读，再安排本地提交、推送和完整 SHA 对应的 Backend checks、Docker checks 验收。
+2. 有效 PR 文件列表实网单独确定场景，不能以 Day 10 概览实网或非法页码的 422 代替。
+
+3. 如需验证 Ubuntu 原生纯运行环境，另建干净环境仅安装运行锁并独立验收，不能以 39 包开发环境或 Debian 容器代替。
+4. 镜像发布、其他机器访问/访问限制和生产部署分别确定范围并授权验收，不从本机 `127.0.0.1`、离线测试或历史 CI 推导通过。
 
 应用级限流、缓存和覆盖率门槛也需要后续单独评估；本批未添加。
 
-PR 文件列表、diff 和多文件审查、整仓库扫描、AI 审查、私有仓库与 Token、评论发布、前端和数据库仍属于后续需要单独设计与确认的工作，不重复安排已经实现的 PR 只读概览。
+diff 和多文件审查、整仓库扫描、AI 审查、私有仓库与 Token、评论发布、前端和数据库仍属于后续需要单独设计与确认的工作；PR 只读概览和单页文件列表已实现，不再列为待开发功能。

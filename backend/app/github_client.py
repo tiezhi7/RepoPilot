@@ -10,11 +10,13 @@ import httpx
 from pydantic import ValidationError
 
 from .schemas import (
+    GitHubPullRequestFilesResponse,
     GitHubPullRequestResponse,
     GitHubRepositoryResponse,
     parse_github_repository_url,
     validate_github_file_path,
     validate_github_pull_number,
+    validate_github_pull_request_files_page,
 )
 
 _MAX_FILE_RESPONSE_BYTES = 65_536
@@ -23,6 +25,8 @@ _MAX_BASE64_CHARACTERS = 26_668
 _FILE_UPSTREAM_MESSAGE = "GitHub 返回了无效或非预期的文件响应。"
 _MAX_PR_RESPONSE_BYTES = 1_048_576
 _PR_UPSTREAM_MESSAGE = "GitHub 返回了无效或非预期的 PR 响应。"
+_MAX_PR_FILES_RESPONSE_BYTES = 1_048_576
+_PR_FILES_UPSTREAM_MESSAGE = "GitHub 返回了无效或非预期的 PR 文件列表响应。"
 
 
 class GitHubClientError(Exception):
@@ -224,6 +228,62 @@ def _pull_request_overview(
     return result
 
 
+def _read_pull_request_files_response(response: httpx.Response) -> object:
+    """限制全部原始正文，包括不返回的 patch；不解压，不信任 Content-Length。"""
+    if response.headers.get("Content-Encoding", "identity").strip().lower() != "identity":
+        raise GitHubUpstreamError(_PR_FILES_UPSTREAM_MESSAGE)
+    body = bytearray()
+    for chunk in response.iter_raw():
+        if len(body) + len(chunk) > _MAX_PR_FILES_RESPONSE_BYTES:
+            raise GitHubUpstreamError(_PR_FILES_UPSTREAM_MESSAGE)
+        body.extend(chunk)
+    try:
+        payload: object = json.loads(body.decode("utf-8"))
+    except (ValueError, RecursionError):
+        raise GitHubUpstreamError(_PR_FILES_UPSTREAM_MESSAGE) from None
+    return payload
+
+
+def _pull_request_files_page(
+    payload: object, repository_url: str, pull_number: int, page: int
+) -> GitHubPullRequestFilesResponse:
+    """只映射元数据；文件名不作为下载路径，不推断改名关系或下一页。"""
+    if not isinstance(payload, list) or len(payload) > 30:
+        raise GitHubUpstreamError(_PR_FILES_UPSTREAM_MESSAGE)
+    files: list[dict[str, object]] = []
+    try:
+        for item in payload:
+            if not isinstance(item, dict):
+                raise GitHubUpstreamError(_PR_FILES_UPSTREAM_MESSAGE)
+            files.append(
+                {
+                    "filename": item["filename"],
+                    "status": item["status"],
+                    "additions": item["additions"],
+                    "deletions": item["deletions"],
+                    "changes": item["changes"],
+                    "previous_filename": item.get("previous_filename"),
+                }
+            )
+        result = GitHubPullRequestFilesResponse.model_validate(
+            {
+                "repository_url": repository_url,
+                "pull_number": pull_number,
+                "page": page,
+                "per_page": 30,
+                "files": files,
+            }
+        )
+        # JSON 转义可能包含孤立代理码点，必须在交给路由之前拒绝。
+        for file in result.files:
+            file.filename.encode("utf-8")
+            if file.previous_filename is not None:
+                file.previous_filename.encode("utf-8")
+    except (KeyError, ValidationError, UnicodeEncodeError):
+        raise GitHubUpstreamError(_PR_FILES_UPSTREAM_MESSAGE) from None
+    return result
+
+
 class GitHubRepositoryClient:
     """固定访问 api.github.com；transport 仅供受信任的应用代码和测试注入。"""
 
@@ -386,6 +446,59 @@ class GitHubRepositoryClient:
                     pull_number,
                     f"https://github.com/{owner}/{repo}/pull/{pull_number}",
                 )
+        except httpx.TimeoutException:
+            raise GitHubTimeoutError("GitHub 请求超时。") from None
+        except httpx.RequestError:
+            raise GitHubNetworkError("GitHub 网络请求失败。") from None
+
+    def fetch_pull_request_files(
+        self, repository_url: str, pull_number: int, page: int = 1
+    ) -> GitHubPullRequestFilesResponse:
+        """单次读取一页 PR 文件元数据；不查询 PR 概览，不自动翻页或下载文件。"""
+        try:
+            if not isinstance(repository_url, str):
+                raise ValueError("仓库地址必须是字符串。")
+            owner, repo = parse_github_repository_url(repository_url)
+            validate_github_pull_number(pull_number)
+            validate_github_pull_request_files_page(page)
+        except ValueError:
+            raise ValueError("仓库地址、PR 编号或页码无效。") from None
+
+        # 同时覆盖请求建立、逐块读取以及 with 退出阶段的 HTTPX 异常。
+        try:
+            with self._client.stream(
+                "GET",
+                f"/repos/{owner}/{repo}/pulls/{pull_number}/files",
+                params={"per_page": 30, "page": page},
+                headers={"Accept-Encoding": "identity"},
+            ) as response:
+                status = response.status_code
+                if status == 404:
+                    raise GitHubNotFoundError("仓库或 PR 不存在或不可公开访问。")
+                if status == 429:
+                    raise GitHubRateLimitError("GitHub 请求受到限流，请稍后重试。")
+                if (
+                    status == 403
+                    and response.headers.get("X-RateLimit-Remaining", "").strip() == "0"
+                ):
+                    raise GitHubRateLimitError("GitHub 请求受到限流，请稍后重试。")
+                if 300 <= status < 400:
+                    raise GitHubRedirectError("GitHub 返回了重定向，请使用仓库当前的主页地址。")
+                if status not in {200, 403}:
+                    raise GitHubUpstreamError(_PR_FILES_UPSTREAM_MESSAGE)
+
+                payload = _read_pull_request_files_response(response)
+                if status == 403:
+                    if not isinstance(payload, dict):
+                        raise GitHubUpstreamError(_PR_FILES_UPSTREAM_MESSAGE)
+                    message = payload.get("message")
+                    if isinstance(message, str) and (
+                        "api rate limit" in message.lower()
+                        or "secondary rate limit" in message.lower()
+                    ):
+                        raise GitHubRateLimitError("GitHub 请求受到限流，请稍后重试。")
+                    raise GitHubForbiddenError("GitHub 拒绝访问该仓库或 PR。")
+                return _pull_request_files_page(payload, repository_url, pull_number, page)
         except httpx.TimeoutException:
             raise GitHubTimeoutError("GitHub 请求超时。") from None
         except httpx.RequestError:

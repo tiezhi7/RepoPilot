@@ -230,3 +230,85 @@ class GitHubPullRequestResponse(BaseModel):
         if re.fullmatch(r"[0-9a-f]{40}", value) is None:
             raise ValueError("提交 SHA 必须是 40 位小写十六进制字符串。")
         return value
+
+
+# 单页固定 30 项；页码上限是本项目的策略，不代表完整文件列表。
+_MAX_GITHUB_PULL_REQUEST_FILES_PAGE = 100
+_GITHUB_PULL_REQUEST_FILES_PER_PAGE = 30
+
+
+def validate_github_pull_request_files_page(page: object) -> int:
+    """页码必须是真正的整数，不自动转换其他类型。"""
+    if type(page) is not int or not 1 <= page <= _MAX_GITHUB_PULL_REQUEST_FILES_PAGE:
+        raise ValueError("PR 文件列表页码必须是 1–100 范围内的整数。")
+    return page
+
+
+class GitHubPullRequestFilesRequest(BaseModel):
+    """只查询 PR 文件列表的一页，不自动翻页或接收自定义每页数量。"""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    repository_url: str = Field(min_length=1, max_length=_MAX_GITHUB_REPOSITORY_URL_LENGTH)
+    pull_number: int = Field(ge=1, le=_MAX_GITHUB_PULL_NUMBER)
+    page: int = Field(default=1, ge=1, le=_MAX_GITHUB_PULL_REQUEST_FILES_PAGE)
+
+    @field_validator("repository_url")
+    @classmethod
+    def validate_repository_url(cls, value: str) -> str:
+        parse_github_repository_url(value)
+        return value
+
+    @field_validator("pull_number", mode="before")
+    @classmethod
+    def validate_pull_number(cls, value: object) -> int:
+        return validate_github_pull_number(value)
+
+    @field_validator("page", mode="before")
+    @classmethod
+    def validate_page(cls, value: object) -> int:
+        return validate_github_pull_request_files_page(value)
+
+
+class GitHubPullRequestFile(BaseModel):
+    """文件名仅作元数据展示，不把它当成本地路径或文件下载参数。"""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    filename: str = Field(min_length=1)
+    status: Literal["added", "removed", "modified", "renamed", "copied", "changed", "unchanged"]
+    additions: int = Field(ge=0)
+    deletions: int = Field(ge=0)
+    changes: int = Field(ge=0)
+    previous_filename: str | None = Field(default=None, min_length=1)
+
+
+class GitHubPullRequestFilesResponse(BaseModel):
+    """返回单页文件元数据，不推断完整性、下一页或源码内容。"""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    repository_url: str = Field(min_length=1, max_length=_MAX_GITHUB_REPOSITORY_URL_LENGTH)
+    pull_number: int = Field(ge=1, le=_MAX_GITHUB_PULL_NUMBER)
+    page: int = Field(ge=1, le=_MAX_GITHUB_PULL_REQUEST_FILES_PAGE)
+    # 使用严格 int 边界，避免 Literal[30] 按相等性接受 30.0。
+    per_page: int = Field(
+        ge=_GITHUB_PULL_REQUEST_FILES_PER_PAGE, le=_GITHUB_PULL_REQUEST_FILES_PER_PAGE
+    )
+    files: list[GitHubPullRequestFile] = Field(max_length=_GITHUB_PULL_REQUEST_FILES_PER_PAGE)
+
+    @field_validator("repository_url")
+    @classmethod
+    def validate_repository_url(cls, value: str) -> str:
+        parse_github_repository_url(value)
+        return value
+
+    @field_validator("pull_number", mode="before")
+    @classmethod
+    def validate_pull_number(cls, value: object) -> int:
+        return validate_github_pull_number(value)
+
+    @field_validator("page", mode="before")
+    @classmethod
+    def validate_page(cls, value: object) -> int:
+        return validate_github_pull_request_files_page(value)

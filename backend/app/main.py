@@ -23,6 +23,8 @@ from .reviewer import review_python
 from .schemas import (
     GitHubFileReviewRequest,
     GitHubFileReviewResponse,
+    GitHubPullRequestFilesRequest,
+    GitHubPullRequestFilesResponse,
     GitHubPullRequestRequest,
     GitHubPullRequestResponse,
     GitHubRepositoryRequest,
@@ -167,4 +169,37 @@ def lookup_github_pull_request(
         raise HTTPException(status_code=502, detail="GitHub 网络请求失败。") from None
 
     # 只转换查询阶段的约定异常，不掩盖响应验证或其他程序错误。
+    return result
+
+
+@app.post("/api/v1/github/pull-request/files", response_model=GitHubPullRequestFilesResponse)
+def lookup_github_pull_request_files(
+    request: GitHubPullRequestFilesRequest,
+    client: Annotated[GitHubRepositoryClient, Depends(get_github_repository_client)],
+) -> GitHubPullRequestFilesResponse:
+    """只查询一页 PR 文件元数据，复用客户端的输入和响应限制。"""
+    try:
+        result = client.fetch_pull_request_files(
+            request.repository_url, request.pull_number, request.page
+        )
+    except GitHubNotFoundError:
+        raise HTTPException(status_code=404, detail="仓库或 PR 不存在或不可公开访问。") from None
+    except GitHubRateLimitError:
+        raise HTTPException(status_code=503, detail="GitHub 请求受到限流，请稍后重试。") from None
+    except GitHubForbiddenError:
+        raise HTTPException(status_code=502, detail="GitHub 拒绝访问该仓库或 PR。") from None
+    except GitHubRedirectError:
+        raise HTTPException(
+            status_code=502, detail="GitHub 返回了重定向，请使用仓库当前的主页地址。"
+        ) from None
+    except GitHubUpstreamError:
+        raise HTTPException(
+            status_code=502, detail="GitHub 返回了无效或非预期的 PR 文件列表响应。"
+        ) from None
+    except GitHubTimeoutError:
+        raise HTTPException(status_code=504, detail="GitHub 请求超时。") from None
+    except GitHubNetworkError:
+        raise HTTPException(status_code=502, detail="GitHub 网络请求失败。") from None
+
+    # 响应验证位于查询异常处理之外，不把程序错误伪装成上游业务错误。
     return result
