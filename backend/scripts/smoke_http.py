@@ -168,11 +168,12 @@ def run(port: int) -> None:
         "/api/v1/github/file-review": "post",
         "/api/v1/github/pull-request": "post",
         "/api/v1/github/pull-request/files": "post",
+        "/api/v1/github/pull-request/file-review": "post",
     }
     for path, method in expected.items():
         route = paths.get(path) if isinstance(paths, dict) else None
         require(isinstance(route, dict) and method in route, f"缺少路由或方法：{path}")
-    print("PASS OpenAPI 六个业务路由", flush=True)
+    print("PASS OpenAPI 七个业务路由", flush=True)
 
     review(port, "正常源码", "x = 1\n")
     review(port, "print 调用", "print('day9')\n", "PY_PRINT", "info")
@@ -244,12 +245,38 @@ def run(port: int) -> None:
     )
     print("PASS PR 文件页码验证", flush=True)
 
+    print("CHECK PR 文件路径验证", flush=True)
+    status, body = request(
+        port,
+        "POST",
+        "/api/v1/github/pull-request/file-review",
+        {
+            "repository_url": "https://github.com/example/repo",
+            "pull_number": 1,
+            "file_path": "../example.py",
+        },
+    )
+    print(f"PR 文件路径验证: HTTP {status}", flush=True)
+    require(status == 422, "无效 PR 文件路径应返回 422")
+    result = json_body(body)
+    details = result.get("detail") if isinstance(result, dict) else None
+    require(isinstance(details, list) and len(details) > 0, "detail 应为非空验证错误数组")
+    require(
+        isinstance(details, list)
+        and any(
+            isinstance(error, dict) and error.get("loc") == ["body", "file_path"]
+            for error in details
+        ),
+        "验证错误未指向 body.file_path 字段",
+    )
+    print("PASS PR 文件路径验证", flush=True)
+
     health(port, "最后健康检查")
-    print("PASS 全部十一项真实 HTTP 检查", flush=True)
+    print("PASS 全部十二项真实 HTTP 检查", flush=True)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="检查本机容器端口的十一项真实 HTTP 行为")
+    parser = argparse.ArgumentParser(description="检查本机容器端口的十二项真实 HTTP 行为")
     parser.add_argument("--port", required=True, type=port_number, help="宿主机端口，1–65535")
     args = parser.parse_args()
     try:

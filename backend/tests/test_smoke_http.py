@@ -21,7 +21,16 @@ VALID_DETAIL = [{"loc": ["body", "pull_number"], "type": "greater_than_equal", "
 FILES_PATH = "/api/v1/github/pull-request/files"
 FILES_REQUEST = {"repository_url": "https://github.com/example/repo", "pull_number": 1, "page": 0}
 VALID_PAGE_DETAIL = [{"loc": ["body", "page"], "type": "value_error", "msg": "页码过小"}]
-SUCCESS_MESSAGE = "PASS 全部十一项真实 HTTP 检查"
+FILE_REVIEW_PATH = "/api/v1/github/pull-request/file-review"
+FILE_REVIEW_REQUEST = {
+    "repository_url": "https://github.com/example/repo",
+    "pull_number": 1,
+    "file_path": "../example.py",
+}
+VALID_FILE_PATH_DETAIL = [
+    {"loc": ["body", "file_path"], "type": "value_error", "msg": "文件路径无效"}
+]
+SUCCESS_MESSAGE = "PASS 全部十二项真实 HTTP 检查"
 
 
 @dataclass
@@ -32,6 +41,9 @@ class Scenario:
     files_method: str | None = "post"
     files_status: int = 422
     files_detail: object = field(default_factory=lambda: VALID_PAGE_DETAIL)
+    file_review_method: str | None = "post"
+    file_review_status: int = 422
+    file_review_detail: object = field(default_factory=lambda: VALID_FILE_PATH_DETAIL)
     extra_route: bool = False
     requests: list[tuple[str, str, object]] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
@@ -54,6 +66,8 @@ def response_for(scenario: Scenario, method: str, path: str, payload: object) ->
             paths[PR_PATH] = {scenario.pr_method: {}}
         if scenario.files_method is not None:
             paths[FILES_PATH] = {scenario.files_method: {}}
+        if scenario.file_review_method is not None:
+            paths[FILE_REVIEW_PATH] = {scenario.file_review_method: {}}
         if scenario.extra_route:
             paths["/future-route"] = {"get": {}}
         return 200, {"paths": paths}
@@ -61,6 +75,8 @@ def response_for(scenario: Scenario, method: str, path: str, payload: object) ->
         return scenario.pr_status, {"detail": scenario.pr_detail}
     if method == "POST" and path == FILES_PATH:
         return scenario.files_status, {"detail": scenario.files_detail}
+    if method == "POST" and path == FILE_REVIEW_PATH:
+        return scenario.file_review_status, {"detail": scenario.file_review_detail}
     if method == "POST" and path == "/api/v1/reviews":
         if payload == {"code": ""}:
             return 422, {"detail": [{"loc": ["body", "code"], "type": "string_too_short"}]}
@@ -177,20 +193,20 @@ def run_smoke(
     )
 
 
-@pytest.mark.parametrize("extra_route", [False, True], ids=["six-routes", "allows-future-route"])
-def test_eleven_checks_send_expected_requests(tmp_path: Path, extra_route: bool) -> None:
+@pytest.mark.parametrize("extra_route", [False, True], ids=["seven-routes", "allows-future-route"])
+def test_twelve_checks_send_expected_requests(tmp_path: Path, extra_route: bool) -> None:
     scenario = Scenario(extra_route=extra_route)
     with local_server(scenario) as port:
         result = run_smoke(port, tmp_path)
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stderr == ""
-    assert "PASS OpenAPI 六个业务路由" in result.stdout
+    assert "PASS OpenAPI 七个业务路由" in result.stdout
     assert SUCCESS_MESSAGE in result.stdout
     for name in (
         "初始健康检查",
         "Swagger HTML（未加载 CDN）",
-        "OpenAPI 六个业务路由",
+        "OpenAPI 七个业务路由",
         "正常源码",
         "print 调用",
         "非法语法",
@@ -198,6 +214,7 @@ def test_eleven_checks_send_expected_requests(tmp_path: Path, extra_route: bool)
         "源码不执行",
         "PR 编号验证",
         "PR 文件页码验证",
+        "PR 文件路径验证",
         "最后健康检查",
     ):
         assert f"PASS {name}" in result.stdout
@@ -212,6 +229,7 @@ def test_eleven_checks_send_expected_requests(tmp_path: Path, extra_route: bool)
         ("POST", "/api/v1/reviews", {"code": 'raise RuntimeError("DAY9_MUST_NOT_EXECUTE")\n'}),
         ("POST", PR_PATH, PR_REQUEST),
         ("POST", FILES_PATH, FILES_REQUEST),
+        ("POST", FILE_REVIEW_PATH, FILE_REVIEW_REQUEST),
         ("GET", "/health", None),
     ]
     pr_requests = [payload for method, path, payload in scenario.requests if path == PR_PATH]
@@ -221,6 +239,12 @@ def test_eleven_checks_send_expected_requests(tmp_path: Path, extra_route: bool)
     assert len(files_requests) == 1
     assert type(files_requests[0]["pull_number"]) is int
     assert type(files_requests[0]["page"]) is int
+    file_review_requests = [
+        payload for method, path, payload in scenario.requests if path == FILE_REVIEW_PATH
+    ]
+    assert len(file_review_requests) == 1
+    assert type(file_review_requests[0]["pull_number"]) is int
+    assert file_review_requests[0]["file_path"] == "../example.py"
 
 
 @pytest.mark.parametrize("method", [None, "get"], ids=["missing-pr-route", "wrong-pr-method"])
@@ -329,3 +353,72 @@ def test_optimized_python_still_rejects_wrong_page_location(tmp_path: Path) -> N
     assert "验证错误未指向 body.page 字段" in result.stderr
     assert SUCCESS_MESSAGE not in result.stdout
     assert scenario.requests[-1] == ("POST", FILES_PATH, FILES_REQUEST)
+
+
+@pytest.mark.parametrize(
+    "method", [None, "get"], ids=["missing-file-review-route", "wrong-file-review-method"]
+)
+def test_openapi_requires_file_review_post(tmp_path: Path, method: str | None) -> None:
+    scenario = Scenario(file_review_method=method)
+    with local_server(scenario) as port:
+        result = run_smoke(port, tmp_path)
+
+    assert result.returncode == 1
+    assert f"缺少路由或方法：{FILE_REVIEW_PATH}" in result.stderr
+    assert SUCCESS_MESSAGE not in result.stdout
+    assert [path for _, path, _ in scenario.requests] == ["/health", "/docs", "/openapi.json"]
+
+
+@pytest.mark.parametrize(
+    ("status", "detail", "message"),
+    [
+        pytest.param(
+            200, VALID_FILE_PATH_DETAIL, "无效 PR 文件路径应返回 422", id="unexpected-success"
+        ),
+        pytest.param(404, VALID_FILE_PATH_DETAIL, "无效 PR 文件路径应返回 422", id="not-found"),
+        pytest.param(500, VALID_FILE_PATH_DETAIL, "无效 PR 文件路径应返回 422", id="server-error"),
+        pytest.param(503, VALID_FILE_PATH_DETAIL, "无效 PR 文件路径应返回 422", id="rate-limit"),
+        pytest.param(422, "错误说明", "detail 应为非空验证错误数组", id="string-detail"),
+        pytest.param(422, [], "detail 应为非空验证错误数组", id="empty-detail"),
+        pytest.param(422, [{"loc": ["body", "pull_number"]}], "验证错误未指向", id="wrong-field"),
+        pytest.param(422, [{"loc": ["file_path"]}], "验证错误未指向", id="missing-body"),
+        pytest.param(
+            422, [{"loc": ["body", "file_path", "extra"]}], "验证错误未指向", id="nested-loc"
+        ),
+        pytest.param(422, ["file_path"], "验证错误未指向", id="non-object-error"),
+    ],
+)
+def test_bad_file_path_validation_fails(
+    tmp_path: Path, status: int, detail: object, message: str
+) -> None:
+    scenario = Scenario(file_review_status=status, file_review_detail=detail)
+    with local_server(scenario) as port:
+        result = run_smoke(port, tmp_path)
+
+    assert result.returncode == 1
+    assert f"PR 文件路径验证: HTTP {status}" in result.stdout
+    assert message in result.stderr
+    assert SUCCESS_MESSAGE not in result.stdout
+    assert scenario.requests[-1] == ("POST", FILE_REVIEW_PATH, FILE_REVIEW_REQUEST)
+    assert scenario.requests.count(("GET", "/health", None)) == 1
+
+
+@pytest.mark.parametrize(
+    ("status", "detail", "message"),
+    [
+        (422, [{"loc": ["body", "pull_number"]}], "验证错误未指向 body.file_path 字段"),
+        (200, VALID_FILE_PATH_DETAIL, "无效 PR 文件路径应返回 422"),
+    ],
+)
+def test_optimized_python_still_checks_file_path(
+    tmp_path: Path, status: int, detail: object, message: str
+) -> None:
+    scenario = Scenario(file_review_status=status, file_review_detail=detail)
+    with local_server(scenario) as port:
+        result = run_smoke(port, tmp_path, optimized=True)
+
+    assert "-O" in result.args
+    assert result.returncode == 1
+    assert message in result.stderr
+    assert SUCCESS_MESSAGE not in result.stdout
+    assert scenario.requests[-1] == ("POST", FILE_REVIEW_PATH, FILE_REVIEW_REQUEST)

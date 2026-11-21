@@ -3,6 +3,7 @@
 import base64
 import binascii
 import json
+from dataclasses import dataclass, field
 from types import TracebackType
 from typing import Self
 
@@ -27,6 +28,7 @@ _MAX_PR_RESPONSE_BYTES = 1_048_576
 _PR_UPSTREAM_MESSAGE = "GitHub 返回了无效或非预期的 PR 响应。"
 _MAX_PR_FILES_RESPONSE_BYTES = 1_048_576
 _PR_FILES_UPSTREAM_MESSAGE = "GitHub 返回了无效或非预期的 PR 文件列表响应。"
+_PR_FILE_UPSTREAM_MESSAGE = "GitHub 返回了无效或非预期的 PR 文件读取响应。"
 
 
 class GitHubClientError(Exception):
@@ -67,6 +69,19 @@ class GitHubFileTooLargeError(GitHubClientError):
 
 class GitHubUnsupportedFileError(GitHubClientError):
     """文件类型或编码不在本客户端支持范围内。"""
+
+
+class GitHubPullRequestSourceUnavailableError(GitHubClientError):
+    """PR 来源仓库已不可用或不是公开仓库，不能回退读取其他版本。"""
+
+
+@dataclass(frozen=True)
+class GitHubPullRequestPythonFile:
+    """供应用内部使用的读取结果；不包含审查结果，也不在 repr 中显示源码。"""
+
+    head_repository_url: str
+    head_sha: str
+    code: str = field(repr=False)
 
 
 def _json_object(response: httpx.Response) -> dict[str, object] | None:
@@ -282,6 +297,35 @@ def _pull_request_files_page(
     except (KeyError, ValidationError, UnicodeEncodeError):
         raise GitHubUpstreamError(_PR_FILES_UPSTREAM_MESSAGE) from None
     return result
+
+
+def _pull_request_file_source(
+    payload: dict[str, object], repository_url: str, pull_number: int, expected_html_url: str
+) -> tuple[str, str]:
+    """沿用 PR 身份验证，只从经验证的来源仓库名构造地址，不访问上游链接。"""
+    try:
+        overview = _pull_request_overview(payload, repository_url, pull_number, expected_html_url)
+        head = payload["head"]
+        if not isinstance(head, dict):
+            raise GitHubUpstreamError(_PR_FILE_UPSTREAM_MESSAGE)
+        source = head["repo"]
+        if source is None:
+            raise GitHubPullRequestSourceUnavailableError("PR 来源仓库不可用于公开文件审查。")
+        if not isinstance(source, dict):
+            raise GitHubUpstreamError(_PR_FILE_UPSTREAM_MESSAGE)
+        full_name = source["full_name"]
+        private = source["private"]
+        if not isinstance(full_name, str) or type(private) is not bool:
+            raise GitHubUpstreamError(_PR_FILE_UPSTREAM_MESSAGE)
+        owner, repo = parse_github_repository_url(f"https://github.com/{full_name}")
+        # full_name 必须恰好是两个路径段，不能接受 URL 规则允许的末尾斜杠。
+        if full_name != f"{owner}/{repo}":
+            raise GitHubUpstreamError(_PR_FILE_UPSTREAM_MESSAGE)
+        if private:
+            raise GitHubPullRequestSourceUnavailableError("PR 来源仓库不可用于公开文件审查。")
+    except (KeyError, ValueError, GitHubUpstreamError):
+        raise GitHubUpstreamError(_PR_FILE_UPSTREAM_MESSAGE) from None
+    return f"https://github.com/{owner}/{repo}", overview.head_sha
 
 
 class GitHubRepositoryClient:
@@ -503,6 +547,85 @@ class GitHubRepositoryClient:
             raise GitHubTimeoutError("GitHub 请求超时。") from None
         except httpx.RequestError:
             raise GitHubNetworkError("GitHub 网络请求失败。") from None
+
+    def fetch_pull_request_python_file(
+        self, repository_url: str, pull_number: int, file_path: str
+    ) -> GitHubPullRequestPythonFile:
+        """先确定 PR 来源和 SHA，再读取该提交的一个文件；不判断它是否属于变更列表。"""
+        try:
+            if not isinstance(repository_url, str):
+                raise ValueError("仓库地址必须是字符串。")
+            owner, repo = parse_github_repository_url(repository_url)
+            validate_github_pull_number(pull_number)
+            validate_github_file_path(file_path)
+        except ValueError:
+            raise ValueError("仓库地址、PR 编号或 Python 文件路径无效。") from None
+
+        payload = self._fetch_pull_request_review_object(
+            f"/repos/{owner}/{repo}/pulls/{pull_number}"
+        )
+        source_url, head_sha = _pull_request_file_source(
+            payload,
+            repository_url,
+            pull_number,
+            f"https://github.com/{owner}/{repo}/pull/{pull_number}",
+        )
+        source_owner, source_repo = parse_github_repository_url(source_url)
+        # 第一份响应已关闭；ref 只使用已验证的完整 SHA，不使用会移动的分支名。
+        file_payload = self._fetch_pull_request_review_object(
+            f"/repos/{source_owner}/{source_repo}/contents/{file_path}", file_ref=head_sha
+        )
+        try:
+            code = _decode_python_file(file_payload, file_path)
+        except GitHubUpstreamError:
+            raise GitHubUpstreamError(_PR_FILE_UPSTREAM_MESSAGE) from None
+        return GitHubPullRequestPythonFile(source_url, head_sha, code)
+
+    def _fetch_pull_request_review_object(
+        self, path: str, *, file_ref: str | None = None
+    ) -> dict[str, object]:
+        """仅供两阶段读取使用；两种正文分别受现有 PR 和文件限制约束。"""
+        try:
+            with self._client.stream(
+                "GET",
+                path,
+                params={"ref": file_ref} if file_ref is not None else None,
+                headers={"Accept-Encoding": "identity"},
+            ) as response:
+                status = response.status_code
+                if status == 404:
+                    raise GitHubNotFoundError("仓库、PR、提交或文件不存在或不可公开访问。")
+                if status == 429 or (
+                    status == 403
+                    and response.headers.get("X-RateLimit-Remaining", "").strip() == "0"
+                ):
+                    raise GitHubRateLimitError("GitHub 请求受到限流，请稍后重试。")
+                if 300 <= status < 400:
+                    raise GitHubRedirectError("GitHub 返回了重定向，请使用仓库当前的主页地址。")
+                if status not in {200, 403}:
+                    raise GitHubUpstreamError(_PR_FILE_UPSTREAM_MESSAGE)
+                payload: dict[str, object] | None
+                if file_ref is None:
+                    payload = _read_pull_request_response(response)
+                else:
+                    payload = _file_json_object(_read_file_response(response))
+                    if payload is None:
+                        raise GitHubUpstreamError(_PR_FILE_UPSTREAM_MESSAGE)
+                if status == 403:
+                    message = payload.get("message")
+                    if isinstance(message, str) and (
+                        "api rate limit" in message.lower()
+                        or "secondary rate limit" in message.lower()
+                    ):
+                        raise GitHubRateLimitError("GitHub 请求受到限流，请稍后重试。")
+                    raise GitHubForbiddenError("GitHub 拒绝访问该仓库、PR 或文件。")
+                return payload
+        except httpx.TimeoutException:
+            raise GitHubTimeoutError("GitHub 请求超时。") from None
+        except httpx.RequestError:
+            raise GitHubNetworkError("GitHub 网络请求失败。") from None
+        except GitHubUpstreamError:
+            raise GitHubUpstreamError(_PR_FILE_UPSTREAM_MESSAGE) from None
 
     @property
     def is_closed(self) -> bool:

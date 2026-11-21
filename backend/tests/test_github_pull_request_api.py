@@ -778,7 +778,7 @@ def test_four_existing_business_routes_remain_compatible(
     assert_resources_closed(upstream, clients=2, responses=2)
 
 
-def test_openapi_exposes_six_routes_and_the_existing_pr_model_contract() -> None:
+def test_openapi_exposes_seven_routes_and_the_existing_pr_model_contract() -> None:
     with TestClient(app) as client:
         response = client.get("/openapi.json")
     assert response.status_code == 200
@@ -790,6 +790,7 @@ def test_openapi_exposes_six_routes_and_the_existing_pr_model_contract() -> None
         "/api/v1/github/file-review": {"post"},
         API_PATH: {"post"},
         "/api/v1/github/pull-request/files": {"post"},
+        "/api/v1/github/pull-request/file-review": {"post"},
     }
     assert set(document["paths"]) == set(expected_methods)
     for path, methods in expected_methods.items():

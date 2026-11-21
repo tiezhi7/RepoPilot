@@ -12,6 +12,7 @@ from .github_client import (
     GitHubForbiddenError,
     GitHubNetworkError,
     GitHubNotFoundError,
+    GitHubPullRequestSourceUnavailableError,
     GitHubRateLimitError,
     GitHubRedirectError,
     GitHubRepositoryClient,
@@ -23,6 +24,8 @@ from .reviewer import review_python
 from .schemas import (
     GitHubFileReviewRequest,
     GitHubFileReviewResponse,
+    GitHubPullRequestFileReviewRequest,
+    GitHubPullRequestFileReviewResponse,
     GitHubPullRequestFilesRequest,
     GitHubPullRequestFilesResponse,
     GitHubPullRequestRequest,
@@ -203,3 +206,56 @@ def lookup_github_pull_request_files(
 
     # 响应验证位于查询异常处理之外，不把程序错误伪装成上游业务错误。
     return result
+
+
+@app.post(
+    "/api/v1/github/pull-request/file-review", response_model=GitHubPullRequestFileReviewResponse
+)
+def review_github_pull_request_file(
+    request: GitHubPullRequestFileReviewRequest,
+    client: Annotated[GitHubRepositoryClient, Depends(get_github_repository_client)],
+) -> GitHubPullRequestFileReviewResponse:
+    """读取 PR 头提交中的指定文件，只对下载阶段转换约定的客户端异常。"""
+    try:
+        result = client.fetch_pull_request_python_file(
+            request.repository_url, request.pull_number, request.file_path
+        )
+    except GitHubNotFoundError:
+        raise HTTPException(
+            status_code=404, detail="仓库、PR、提交或文件不存在或不可公开访问。"
+        ) from None
+    except GitHubRateLimitError:
+        raise HTTPException(status_code=503, detail="GitHub 请求受到限流，请稍后重试。") from None
+    except GitHubForbiddenError:
+        raise HTTPException(status_code=502, detail="GitHub 拒绝访问该仓库、PR 或文件。") from None
+    except GitHubRedirectError:
+        raise HTTPException(
+            status_code=502, detail="GitHub 返回了重定向，请使用仓库当前的主页地址。"
+        ) from None
+    except GitHubUpstreamError:
+        raise HTTPException(
+            status_code=502, detail="GitHub 返回了无效或非预期的 PR 文件读取响应。"
+        ) from None
+    except GitHubTimeoutError:
+        raise HTTPException(status_code=504, detail="GitHub 请求超时。") from None
+    except GitHubNetworkError:
+        raise HTTPException(status_code=502, detail="GitHub 网络请求失败。") from None
+    except GitHubFileTooLargeError:
+        raise HTTPException(
+            status_code=422, detail="Python 文件超过大小限制，最多允许 20000 字节。"
+        ) from None
+    except GitHubUnsupportedFileError:
+        raise HTTPException(status_code=422, detail="GitHub 文件类型或编码不受支持。") from None
+    except GitHubPullRequestSourceUnavailableError:
+        raise HTTPException(status_code=422, detail="PR 来源仓库不可用于公开文件审查。") from None
+
+    # 审查及响应组装在下载异常处理之外；源码只作 AST 数据，不执行或导入。
+    issues = review_python(result.code)
+    return GitHubPullRequestFileReviewResponse(
+        repository_url=request.repository_url,
+        pull_number=request.pull_number,
+        file_path=request.file_path,
+        head_repository_url=result.head_repository_url,
+        head_sha=result.head_sha,
+        review=ReviewResponse(language="python", issue_count=len(issues), issues=issues),
+    )

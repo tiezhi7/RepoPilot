@@ -312,3 +312,66 @@ class GitHubPullRequestFilesResponse(BaseModel):
     @classmethod
     def validate_page(cls, value: object) -> int:
         return validate_github_pull_request_files_page(value)
+
+
+class GitHubPullRequestFileReviewRequest(BaseModel):
+    """指定 PR 中一个 Python 文件；来源仓库和提交由后续客户端确定。"""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    repository_url: str = Field(min_length=1, max_length=_MAX_GITHUB_REPOSITORY_URL_LENGTH)
+    pull_number: int = Field(ge=1, le=_MAX_GITHUB_PULL_NUMBER)
+    file_path: str = Field(min_length=1, max_length=_MAX_GITHUB_FILE_PATH_LENGTH)
+
+    @field_validator("repository_url")
+    @classmethod
+    def validate_repository_url(cls, value: str) -> str:
+        parse_github_repository_url(value)
+        return value
+
+    @field_validator("pull_number", mode="before")
+    @classmethod
+    def validate_pull_number(cls, value: object) -> int:
+        return validate_github_pull_number(value)
+
+    @field_validator("file_path")
+    @classmethod
+    def validate_file_path(cls, value: str) -> str:
+        return validate_github_file_path(value)
+
+
+class GitHubPullRequestFileReviewResponse(BaseModel):
+    """记录实际来源和提交，复用整文件审查结果，不包含源码或 diff。"""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    repository_url: str = Field(min_length=1, max_length=_MAX_GITHUB_REPOSITORY_URL_LENGTH)
+    pull_number: int = Field(ge=1, le=_MAX_GITHUB_PULL_NUMBER)
+    file_path: str = Field(min_length=1, max_length=_MAX_GITHUB_FILE_PATH_LENGTH)
+    head_repository_url: str = Field(min_length=1, max_length=_MAX_GITHUB_REPOSITORY_URL_LENGTH)
+    head_sha: str = Field(min_length=40, max_length=40)
+    review: ReviewResponse
+
+    @field_validator("repository_url", "head_repository_url")
+    @classmethod
+    def validate_repository_url(cls, value: str) -> str:
+        parse_github_repository_url(value)
+        return value
+
+    @field_validator("pull_number", mode="before")
+    @classmethod
+    def validate_pull_number(cls, value: object) -> int:
+        return validate_github_pull_number(value)
+
+    @field_validator("file_path")
+    @classmethod
+    def validate_file_path(cls, value: str) -> str:
+        return validate_github_file_path(value)
+
+    @field_validator("head_sha")
+    @classmethod
+    def validate_commit_sha(cls, value: str) -> str:
+        # fullmatch 拒绝尾部换行；版本标识不自动去空格或转换大小写。
+        if re.fullmatch(r"[0-9a-f]{40}", value) is None:
+            raise ValueError("提交 SHA 必须是 40 位小写十六进制字符串。")
+        return value
