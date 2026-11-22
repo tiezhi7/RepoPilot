@@ -547,7 +547,7 @@ def test_old_local_routes_and_wrong_method_remain_compatible(
     assert_resources_closed(upstream, clients=0, responses=0)
 
 
-def test_openapi_exposes_seven_routes_and_exact_review_contract(api_client: TestClient) -> None:
+def test_openapi_exposes_eight_routes_and_exact_review_contract(api_client: TestClient) -> None:
     response = api_client.get("/openapi.json")
     assert response.status_code == 200
     document = response.json()
@@ -559,6 +559,7 @@ def test_openapi_exposes_seven_routes_and_exact_review_contract(api_client: Test
         "/api/v1/github/pull-request": {"post"},
         "/api/v1/github/pull-request/files": {"post"},
         API_PATH: {"post"},
+        "/api/v1/github/pull-request/batch-file-review": {"post"},
     }
     operation = document["paths"][API_PATH]["post"]
     assert operation["requestBody"]["content"]["application/json"]["schema"] == {

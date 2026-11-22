@@ -375,3 +375,100 @@ class GitHubPullRequestFileReviewResponse(BaseModel):
         if re.fullmatch(r"[0-9a-f]{40}", value) is None:
             raise ValueError("提交 SHA 必须是 40 位小写十六进制字符串。")
         return value
+
+
+# 这是本项目的批量审查配额；调用方必须明确提供路径，不自动筛选 PR 文件。
+_MAX_GITHUB_PULL_REQUEST_REVIEW_FILES = 3
+
+
+def validate_github_pull_request_file_paths(file_paths: object) -> list[str]:
+    """只接受 1–3 个不同的 Python 路径；返回新列表，保留顺序和原始大小写。"""
+    if type(file_paths) is not list:
+        raise ValueError("PR 文件路径必须是列表。")
+    if not 1 <= len(file_paths) <= _MAX_GITHUB_PULL_REQUEST_REVIEW_FILES:
+        raise ValueError("PR 文件路径列表必须包含 1–3 项。")
+    paths = [validate_github_file_path(path) for path in file_paths]
+    # Git 路径区分大小写，不做排序、去重或路径规范化来掩盖无效输入。
+    if len(set(paths)) != len(paths):
+        raise ValueError("PR 文件路径不能重复。")
+    return paths
+
+
+class GitHubPullRequestBatchFileReviewRequest(BaseModel):
+    """指定同一个 PR 的少量文件；来源仓库与固定 SHA 由后续客户端确定。"""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    repository_url: str = Field(min_length=1, max_length=_MAX_GITHUB_REPOSITORY_URL_LENGTH)
+    pull_number: int = Field(ge=1, le=_MAX_GITHUB_PULL_NUMBER)
+    file_paths: list[str] = Field(min_length=1, max_length=_MAX_GITHUB_PULL_REQUEST_REVIEW_FILES)
+
+    @field_validator("repository_url")
+    @classmethod
+    def validate_repository_url(cls, value: str) -> str:
+        parse_github_repository_url(value)
+        return value
+
+    @field_validator("pull_number", mode="before")
+    @classmethod
+    def validate_pull_number(cls, value: object) -> int:
+        return validate_github_pull_number(value)
+
+    @field_validator("file_paths", mode="before")
+    @classmethod
+    def validate_file_paths(cls, value: object) -> list[str]:
+        return validate_github_pull_request_file_paths(value)
+
+
+class GitHubPullRequestBatchFileReviewItem(BaseModel):
+    """一个文件的完整审查结果，不携带源码、独立来源或部分失败信息。"""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    file_path: str = Field(min_length=1, max_length=_MAX_GITHUB_FILE_PATH_LENGTH)
+    review: ReviewResponse
+
+    @field_validator("file_path")
+    @classmethod
+    def validate_file_path(cls, value: str) -> str:
+        return validate_github_file_path(value)
+
+
+class GitHubPullRequestBatchFileReviewResponse(BaseModel):
+    """整批共用一个来源仓库和头提交；files 按调用方的路径顺序组装。"""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    repository_url: str = Field(min_length=1, max_length=_MAX_GITHUB_REPOSITORY_URL_LENGTH)
+    pull_number: int = Field(ge=1, le=_MAX_GITHUB_PULL_NUMBER)
+    head_repository_url: str = Field(min_length=1, max_length=_MAX_GITHUB_REPOSITORY_URL_LENGTH)
+    head_sha: str = Field(min_length=40, max_length=40)
+    files: list[GitHubPullRequestBatchFileReviewItem] = Field(
+        min_length=1, max_length=_MAX_GITHUB_PULL_REQUEST_REVIEW_FILES
+    )
+
+    @field_validator("repository_url", "head_repository_url")
+    @classmethod
+    def validate_repository_url(cls, value: str) -> str:
+        parse_github_repository_url(value)
+        return value
+
+    @field_validator("pull_number", mode="before")
+    @classmethod
+    def validate_pull_number(cls, value: object) -> int:
+        return validate_github_pull_number(value)
+
+    @field_validator("head_sha")
+    @classmethod
+    def validate_commit_sha(cls, value: str) -> str:
+        if re.fullmatch(r"[0-9a-f]{40}", value) is None:
+            raise ValueError("提交 SHA 必须是 40 位小写十六进制字符串。")
+        return value
+
+    @field_validator("files")
+    @classmethod
+    def validate_files(
+        cls, value: list[GitHubPullRequestBatchFileReviewItem]
+    ) -> list[GitHubPullRequestBatchFileReviewItem]:
+        validate_github_pull_request_file_paths([item.file_path for item in value])
+        return value

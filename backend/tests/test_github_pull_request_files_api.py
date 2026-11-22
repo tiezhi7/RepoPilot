@@ -532,7 +532,7 @@ def test_production_dependency_closes_distinct_clients_on_repeated_requests(
     assert app.dependency_overrides == {}
 
 
-def test_openapi_exposes_seven_routes_and_strict_files_contract() -> None:
+def test_openapi_exposes_eight_routes_and_strict_files_contract() -> None:
     with TestClient(app) as client:
         response = client.get("/openapi.json")
     assert response.status_code == 200
@@ -545,6 +545,7 @@ def test_openapi_exposes_seven_routes_and_strict_files_contract() -> None:
         "/api/v1/github/pull-request": {"post"},
         API_PATH: {"post"},
         "/api/v1/github/pull-request/file-review": {"post"},
+        "/api/v1/github/pull-request/batch-file-review": {"post"},
     }
     operation = document["paths"][API_PATH]["post"]
     assert (

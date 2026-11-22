@@ -17,6 +17,7 @@ from .schemas import (
     parse_github_repository_url,
     validate_github_file_path,
     validate_github_pull_number,
+    validate_github_pull_request_file_paths,
     validate_github_pull_request_files_page,
 )
 
@@ -82,6 +83,23 @@ class GitHubPullRequestPythonFile:
     head_repository_url: str
     head_sha: str
     code: str = field(repr=False)
+
+
+@dataclass(frozen=True)
+class GitHubPullRequestPythonFileContent:
+    """批量结果中的一个文件；源码仅供后续静态分析，不显示在 repr 中。"""
+
+    file_path: str
+    code: str = field(repr=False)
+
+
+@dataclass(frozen=True)
+class GitHubPullRequestPythonFiles:
+    """所有文件共用同一个来源和 SHA；元组及冻结条目保留读取顺序。"""
+
+    head_repository_url: str
+    head_sha: str
+    files: tuple[GitHubPullRequestPythonFileContent, ...]
 
 
 def _json_object(response: httpx.Response) -> dict[str, object] | None:
@@ -580,6 +598,43 @@ class GitHubRepositoryClient:
         except GitHubUpstreamError:
             raise GitHubUpstreamError(_PR_FILE_UPSTREAM_MESSAGE) from None
         return GitHubPullRequestPythonFile(source_url, head_sha, code)
+
+    def fetch_pull_request_python_files(
+        self, repository_url: str, pull_number: int, file_paths: list[str]
+    ) -> GitHubPullRequestPythonFiles:
+        """只查询一次 PR，再按同一个 SHA 顺序读取指定文件；失败时不返回部分结果。"""
+        try:
+            if not isinstance(repository_url, str):
+                raise ValueError("仓库地址必须是字符串。")
+            owner, repo = parse_github_repository_url(repository_url)
+            validate_github_pull_number(pull_number)
+            # 验证全部路径并复制列表，后续读取不受调用方修改原列表的影响。
+            paths = validate_github_pull_request_file_paths(file_paths)
+        except ValueError:
+            raise ValueError("仓库地址、PR 编号或 Python 文件路径列表无效。") from None
+
+        payload = self._fetch_pull_request_review_object(
+            f"/repos/{owner}/{repo}/pulls/{pull_number}"
+        )
+        source_url, head_sha = _pull_request_file_source(
+            payload,
+            repository_url,
+            pull_number,
+            f"https://github.com/{owner}/{repo}/pull/{pull_number}",
+        )
+        source_owner, source_repo = parse_github_repository_url(source_url)
+        files: list[GitHubPullRequestPythonFileContent] = []
+        for file_path in paths:
+            # 不循环调用单文件方法，避免每个文件重新查询并取得不同的 PR 头提交。
+            file_payload = self._fetch_pull_request_review_object(
+                f"/repos/{source_owner}/{source_repo}/contents/{file_path}", file_ref=head_sha
+            )
+            try:
+                code = _decode_python_file(file_payload, file_path)
+            except GitHubUpstreamError:
+                raise GitHubUpstreamError(_PR_FILE_UPSTREAM_MESSAGE) from None
+            files.append(GitHubPullRequestPythonFileContent(file_path, code))
+        return GitHubPullRequestPythonFiles(source_url, head_sha, tuple(files))
 
     def _fetch_pull_request_review_object(
         self, path: str, *, file_ref: str | None = None

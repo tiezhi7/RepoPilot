@@ -30,7 +30,16 @@ FILE_REVIEW_REQUEST = {
 VALID_FILE_PATH_DETAIL = [
     {"loc": ["body", "file_path"], "type": "value_error", "msg": "文件路径无效"}
 ]
-SUCCESS_MESSAGE = "PASS 全部十二项真实 HTTP 检查"
+BATCH_REVIEW_PATH = "/api/v1/github/pull-request/batch-file-review"
+BATCH_REVIEW_REQUEST = {
+    "repository_url": "https://github.com/example/repo",
+    "pull_number": 1,
+    "file_paths": [],
+}
+VALID_BATCH_PATHS_DETAIL = [
+    {"loc": ["body", "file_paths"], "type": "value_error", "msg": "文件路径列表为空"}
+]
+SUCCESS_MESSAGE = "PASS 全部十三项真实 HTTP 检查"
 
 
 @dataclass
@@ -44,6 +53,9 @@ class Scenario:
     file_review_method: str | None = "post"
     file_review_status: int = 422
     file_review_detail: object = field(default_factory=lambda: VALID_FILE_PATH_DETAIL)
+    batch_review_method: str | None = "post"
+    batch_review_status: int = 422
+    batch_review_detail: object = field(default_factory=lambda: VALID_BATCH_PATHS_DETAIL)
     extra_route: bool = False
     requests: list[tuple[str, str, object]] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
@@ -68,6 +80,8 @@ def response_for(scenario: Scenario, method: str, path: str, payload: object) ->
             paths[FILES_PATH] = {scenario.files_method: {}}
         if scenario.file_review_method is not None:
             paths[FILE_REVIEW_PATH] = {scenario.file_review_method: {}}
+        if scenario.batch_review_method is not None:
+            paths[BATCH_REVIEW_PATH] = {scenario.batch_review_method: {}}
         if scenario.extra_route:
             paths["/future-route"] = {"get": {}}
         return 200, {"paths": paths}
@@ -77,6 +91,8 @@ def response_for(scenario: Scenario, method: str, path: str, payload: object) ->
         return scenario.files_status, {"detail": scenario.files_detail}
     if method == "POST" and path == FILE_REVIEW_PATH:
         return scenario.file_review_status, {"detail": scenario.file_review_detail}
+    if method == "POST" and path == BATCH_REVIEW_PATH:
+        return scenario.batch_review_status, {"detail": scenario.batch_review_detail}
     if method == "POST" and path == "/api/v1/reviews":
         if payload == {"code": ""}:
             return 422, {"detail": [{"loc": ["body", "code"], "type": "string_too_short"}]}
@@ -193,20 +209,20 @@ def run_smoke(
     )
 
 
-@pytest.mark.parametrize("extra_route", [False, True], ids=["seven-routes", "allows-future-route"])
-def test_twelve_checks_send_expected_requests(tmp_path: Path, extra_route: bool) -> None:
+@pytest.mark.parametrize("extra_route", [False, True], ids=["eight-routes", "allows-future-route"])
+def test_thirteen_checks_send_expected_requests(tmp_path: Path, extra_route: bool) -> None:
     scenario = Scenario(extra_route=extra_route)
     with local_server(scenario) as port:
         result = run_smoke(port, tmp_path)
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stderr == ""
-    assert "PASS OpenAPI 七个业务路由" in result.stdout
+    assert "PASS OpenAPI 八个业务路由" in result.stdout
     assert SUCCESS_MESSAGE in result.stdout
     for name in (
         "初始健康检查",
         "Swagger HTML（未加载 CDN）",
-        "OpenAPI 七个业务路由",
+        "OpenAPI 八个业务路由",
         "正常源码",
         "print 调用",
         "非法语法",
@@ -215,6 +231,7 @@ def test_twelve_checks_send_expected_requests(tmp_path: Path, extra_route: bool)
         "PR 编号验证",
         "PR 文件页码验证",
         "PR 文件路径验证",
+        "PR 批量文件路径验证",
         "最后健康检查",
     ):
         assert f"PASS {name}" in result.stdout
@@ -230,6 +247,7 @@ def test_twelve_checks_send_expected_requests(tmp_path: Path, extra_route: bool)
         ("POST", PR_PATH, PR_REQUEST),
         ("POST", FILES_PATH, FILES_REQUEST),
         ("POST", FILE_REVIEW_PATH, FILE_REVIEW_REQUEST),
+        ("POST", BATCH_REVIEW_PATH, BATCH_REVIEW_REQUEST),
         ("GET", "/health", None),
     ]
     pr_requests = [payload for method, path, payload in scenario.requests if path == PR_PATH]
@@ -245,6 +263,14 @@ def test_twelve_checks_send_expected_requests(tmp_path: Path, extra_route: bool)
     assert len(file_review_requests) == 1
     assert type(file_review_requests[0]["pull_number"]) is int
     assert file_review_requests[0]["file_path"] == "../example.py"
+
+    batch_requests = [
+        payload for method, path, payload in scenario.requests if path == BATCH_REVIEW_PATH
+    ]
+    assert len(batch_requests) == 1
+    assert type(batch_requests[0]["pull_number"]) is int
+    assert type(batch_requests[0]["file_paths"]) is list
+    assert batch_requests[0]["file_paths"] == []
 
 
 @pytest.mark.parametrize("method", [None, "get"], ids=["missing-pr-route", "wrong-pr-method"])
@@ -422,3 +448,91 @@ def test_optimized_python_still_checks_file_path(
     assert message in result.stderr
     assert SUCCESS_MESSAGE not in result.stdout
     assert scenario.requests[-1] == ("POST", FILE_REVIEW_PATH, FILE_REVIEW_REQUEST)
+
+
+@pytest.mark.parametrize(
+    "method", [None, "get"], ids=["missing-batch-review-route", "wrong-batch-review-method"]
+)
+def test_openapi_requires_batch_review_post(tmp_path: Path, method: str | None) -> None:
+    scenario = Scenario(batch_review_method=method)
+    with local_server(scenario) as port:
+        result = run_smoke(port, tmp_path)
+
+    assert result.returncode == 1
+    assert f"缺少路由或方法：{BATCH_REVIEW_PATH}" in result.stderr
+    assert SUCCESS_MESSAGE not in result.stdout
+    assert [path for _, path, _ in scenario.requests] == ["/health", "/docs", "/openapi.json"]
+
+
+@pytest.mark.parametrize(
+    ("status", "detail", "message"),
+    [
+        pytest.param(
+            200, VALID_BATCH_PATHS_DETAIL, "空 PR 文件路径列表应返回 422", id="unexpected-success"
+        ),
+        pytest.param(404, VALID_BATCH_PATHS_DETAIL, "空 PR 文件路径列表应返回 422", id="not-found"),
+        pytest.param(
+            500, VALID_BATCH_PATHS_DETAIL, "空 PR 文件路径列表应返回 422", id="server-error"
+        ),
+        pytest.param(
+            503, VALID_BATCH_PATHS_DETAIL, "空 PR 文件路径列表应返回 422", id="rate-limit"
+        ),
+        pytest.param(422, "错误说明", "detail 应为非空验证错误数组", id="string-detail"),
+        pytest.param(422, [], "detail 应为非空验证错误数组", id="empty-detail"),
+        pytest.param(422, [{"loc": ["body", "pull_number"]}], "验证错误未指向", id="wrong-field"),
+        pytest.param(422, [{"loc": ["file_paths"]}], "验证错误未指向", id="missing-body"),
+        pytest.param(422, [{"loc": ["body", "file_paths", 0]}], "验证错误未指向", id="nested-loc"),
+        pytest.param(422, ["file_paths"], "验证错误未指向", id="non-object-error"),
+    ],
+)
+def test_bad_batch_path_list_validation_fails(
+    tmp_path: Path, status: int, detail: object, message: str
+) -> None:
+    scenario = Scenario(batch_review_status=status, batch_review_detail=detail)
+    with local_server(scenario) as port:
+        result = run_smoke(port, tmp_path)
+
+    assert result.returncode == 1
+    assert f"PR 批量文件路径验证: HTTP {status}" in result.stdout
+    assert message in result.stderr
+    assert SUCCESS_MESSAGE not in result.stdout
+    assert scenario.requests[-1] == ("POST", BATCH_REVIEW_PATH, BATCH_REVIEW_REQUEST)
+    assert scenario.requests.count(("GET", "/health", None)) == 1
+
+
+@pytest.mark.parametrize(
+    ("status", "detail", "message"),
+    [
+        (422, [{"loc": ["body", "pull_number"]}], "验证错误未指向 body.file_paths 字段"),
+        (200, VALID_BATCH_PATHS_DETAIL, "空 PR 文件路径列表应返回 422"),
+    ],
+)
+def test_optimized_python_still_checks_batch_path_list(
+    tmp_path: Path, status: int, detail: object, message: str
+) -> None:
+    scenario = Scenario(batch_review_status=status, batch_review_detail=detail)
+    with local_server(scenario) as port:
+        result = run_smoke(port, tmp_path, optimized=True)
+
+    assert "-O" in result.args
+    assert result.returncode == 1
+    assert message in result.stderr
+    assert SUCCESS_MESSAGE not in result.stdout
+    assert scenario.requests[-1] == ("POST", BATCH_REVIEW_PATH, BATCH_REVIEW_REQUEST)
+    assert scenario.requests.count(("GET", "/health", None)) == 1
+
+
+def test_optimized_python_completes_all_thirteen_checks(tmp_path: Path) -> None:
+    scenario = Scenario()
+    with local_server(scenario) as port:
+        result = run_smoke(port, tmp_path, optimized=True)
+
+    assert "-O" in result.args
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stderr == ""
+    assert SUCCESS_MESSAGE in result.stdout
+    assert len(scenario.requests) == 13
+    assert scenario.requests[-2:] == [
+        ("POST", BATCH_REVIEW_PATH, BATCH_REVIEW_REQUEST),
+        ("GET", "/health", None),
+    ]
