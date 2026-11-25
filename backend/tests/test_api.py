@@ -300,3 +300,85 @@ def test_invalid_code_is_rejected_before_review(
     errors = response.json()["detail"]
     assert any(error["loc"] == ["body", "code"] and error["type"] == error_type for error in errors)
     assert all("input" not in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    ("code", "expected_lines"),
+    [
+        ("def f(items=[]):\n    pass\n", [1]),
+        ("async def f(options={}):\n    pass\n", [1]),
+        ("f = lambda unique={1}: None\n", [1]),
+        ("def f(\n    items=[],\n    *,\n    options={},\n):\n    pass\n", [2, 4]),
+    ],
+)
+def test_mutable_defaults_have_exact_api_response(
+    client: TestClient, code: str, expected_lines: list[int]
+) -> None:
+    response = client.post("/api/v1/reviews", json={"code": code})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "language": "python",
+        "issue_count": len(expected_lines),
+        "issues": [
+            {
+                "rule_id": "PY_MUTABLE_DEFAULT",
+                "severity": "warning",
+                "line": line,
+                "message": "可变默认参数可能在多次调用间共享状态；建议使用 None，并在函数内创建新对象。",
+            }
+            for line in expected_lines
+        ],
+    }
+
+
+def test_mutable_default_expression_is_not_executed_by_api(client: TestClient, tmp_path) -> None:
+    target = tmp_path / "api-default-must-not-run.txt"
+    code = (
+        "from pathlib import Path\n"
+        f"def f(items=[Path({str(target)!r}).write_text('unexpected', encoding='utf-8')]):\n"
+        "    pass\n"
+        "raise RuntimeError('submitted code must not run')\n"
+    )
+    assert not target.exists()
+
+    response = client.post("/api/v1/reviews", json={"code": code})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "language": "python",
+        "issue_count": 1,
+        "issues": [
+            {
+                "rule_id": "PY_MUTABLE_DEFAULT",
+                "severity": "warning",
+                "line": 2,
+                "message": "可变默认参数可能在多次调用间共享状态；建议使用 None，并在函数内创建新对象。",
+            }
+        ],
+    }
+    assert not target.exists()
+
+
+def test_openapi_review_issue_exposes_new_and_existing_rule_ids(client: TestClient) -> None:
+    response = client.get("/openapi.json")
+
+    assert response.status_code == 200
+    issue = response.json()["components"]["schemas"]["ReviewIssue"]
+    assert (
+        set(issue["properties"])
+        == set(issue["required"])
+        == {
+            "rule_id",
+            "severity",
+            "line",
+            "message",
+        }
+    )
+    assert set(issue["properties"]["rule_id"]["enum"]) == {
+        "PY_EVAL",
+        "PY_PRINT",
+        "PY_BARE_EXCEPT",
+        "PY_SYNTAX",
+        "PY_MUTABLE_DEFAULT",
+    }

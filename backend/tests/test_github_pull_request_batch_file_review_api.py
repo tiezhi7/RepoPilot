@@ -616,3 +616,60 @@ def test_openapi_exposes_eight_routes_and_exact_batch_contract(api_client: TestC
         assert schema["properties"][name]["maxItems"] == 3
     assert item["properties"]["review"] == {"$ref": "#/components/schemas/ReviewResponse"}
     assert app.dependency_overrides == {}
+
+
+def test_mutable_defaults_are_reviewed_per_file_after_all_downloads(
+    api_client: TestClient, upstream: MockUpstream, review_inputs: list[str]
+) -> None:
+    sources = [
+        "def f(\n    items=[],\n):\n    pass\n",
+        "print('before')\ndef f(options={}):\n    return options\n",
+        "def f(items=None):\n    return []\n",
+    ]
+    upstream.sources = dict(zip(FILE_PATHS, sources, strict=True))
+
+    response = api_client.post(API_PATH, json=request_body())
+
+    warning = {
+        "rule_id": "PY_MUTABLE_DEFAULT",
+        "severity": "warning",
+        "line": 2,
+        "message": "可变默认参数可能在多次调用间共享状态；建议使用 None，并在函数内创建新对象。",
+    }
+    reviews = [
+        {"language": "python", "issue_count": 1, "issues": [warning]},
+        {
+            "language": "python",
+            "issue_count": 2,
+            "issues": [
+                {
+                    "rule_id": "PY_PRINT",
+                    "severity": "info",
+                    "line": 1,
+                    "message": "发现 print() 调用；请确认是否需要保留调试输出。",
+                },
+                warning,
+            ],
+        },
+        {"language": "python", "issue_count": 0, "issues": []},
+    ]
+    assert response.status_code == 200
+    assert response.json() == {
+        "repository_url": REPOSITORY_URL,
+        "pull_number": 42,
+        "head_repository_url": f"https://github.com/{upstream.source_name}",
+        "head_sha": HEAD_SHA,
+        "files": [
+            {"file_path": path, "review": review}
+            for path, review in zip(FILE_PATHS, reviews, strict=True)
+        ],
+    }
+    assert review_inputs == sources
+    assert upstream.fetch_calls == [(REPOSITORY_URL, 42, FILE_PATHS)]
+    assert len(upstream.requests) == 4
+    assert [request.url.path for request in upstream.requests[1:]] == [
+        f"/repos/{upstream.source_name}/contents/{path}" for path in FILE_PATHS
+    ]
+    assert all(dict(request.url.params) == {"ref": HEAD_SHA} for request in upstream.requests[1:])
+    assert_resources_closed(upstream, clients=1, responses=4)
+    assert app.dependency_overrides == {}

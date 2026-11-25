@@ -113,6 +113,8 @@ def review(
     code: str,
     rule_id: str | None = None,
     severity: str | None = None,
+    *,
+    expected_line: int | None = None,
 ) -> None:
     print(f"CHECK {name}", flush=True)
     status, body = request(port, "POST", "/api/v1/reviews", {"code": code})
@@ -140,6 +142,8 @@ def review(
         require(type(line) is int and line >= 1, f"{name} 行号必须是正整数")
         if rule_id == "PY_PRINT":
             require(line == 1, f"{name} 行号应为 1")
+        if expected_line is not None:
+            require(line == expected_line, f"{name} 行号应为 {expected_line}")
     print(f"PASS {name}", flush=True)
 
 
@@ -178,6 +182,14 @@ def run(port: int) -> None:
 
     review(port, "正常源码", "x = 1\n")
     review(port, "print 调用", "print('day9')\n", "PY_PRINT", "info")
+    review(
+        port,
+        "可变默认参数",
+        "def add_item(\n    item, items=[],\n):\n    items.append(item)\n    return items\n",
+        "PY_MUTABLE_DEFAULT",
+        "warning",
+        expected_line=2,
+    )
     review(port, "非法语法", "def broken(:\n", "PY_SYNTAX", "error")
 
     print("CHECK 空 code", flush=True)
@@ -299,11 +311,11 @@ def run(port: int) -> None:
     print("PASS PR 批量文件路径验证", flush=True)
 
     health(port, "最后健康检查")
-    print("PASS 全部十三项真实 HTTP 检查", flush=True)
+    print("PASS 全部十四项真实 HTTP 检查", flush=True)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="检查本机容器端口的十三项真实 HTTP 行为")
+    parser = argparse.ArgumentParser(description="检查本机容器端口的十四项真实 HTTP 行为")
     parser.add_argument("--port", required=True, type=port_number, help="宿主机端口，1–65535")
     args = parser.parse_args()
     try:

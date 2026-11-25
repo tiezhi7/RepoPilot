@@ -41,6 +41,26 @@ def check_bare_except(node: ast.AST) -> ReviewIssue | None:
     return None
 
 
+def check_mutable_defaults(node: ast.AST) -> list[ReviewIssue]:
+    """检查当前函数的直接可变默认字面量，每个匹配项各返回一条问题。"""
+    issues: list[ReviewIssue] = []
+    if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+        return issues
+
+    # 只检查默认表达式本身；必填关键字参数对应 None，不递归推断变量或调用。
+    for default in (*node.args.defaults, *node.args.kw_defaults):
+        if isinstance(default, (ast.List, ast.Dict, ast.Set)):
+            issues.append(
+                ReviewIssue(
+                    rule_id="PY_MUTABLE_DEFAULT",
+                    severity="warning",
+                    line=default.lineno,
+                    message="可变默认参数可能在多次调用间共享状态；建议使用 None，并在函数内创建新对象。",
+                )
+            )
+    return issues
+
+
 def collect_issues(tree: ast.AST) -> list[ReviewIssue]:
     """只遍历一次 AST，对每个节点依次调用规则，收集匹配的问题。"""
     checks = (check_eval, check_print, check_bare_except)
@@ -52,5 +72,6 @@ def collect_issues(tree: ast.AST) -> list[ReviewIssue]:
             issue = check(node)
             if issue is not None:
                 issues.append(issue)
+        issues.extend(check_mutable_defaults(node))
 
     return issues
