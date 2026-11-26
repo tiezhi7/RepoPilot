@@ -41,6 +41,25 @@ def check_bare_except(node: ast.AST) -> ReviewIssue | None:
     return None
 
 
+def check_broad_except_pass(node: ast.AST) -> ReviewIssue | None:
+    """识别直接捕获 Exception/BaseException 后仅执行 pass 的处理分支。"""
+    # 只按直接名称和单个 pass 匹配；不推断别名、元组或名称绑定。
+    if (
+        not isinstance(node, ast.ExceptHandler)
+        or not isinstance(node.type, ast.Name)
+        or node.type.id not in ("Exception", "BaseException")
+        or len(node.body) != 1
+        or not isinstance(node.body[0], ast.Pass)
+    ):
+        return None
+    return ReviewIssue(
+        rule_id="PY_BROAD_EXCEPT_PASS",
+        severity="warning",
+        line=node.lineno,
+        message="广泛捕获异常后直接忽略，可能掩盖错误；请确认是否需要处理或重新抛出异常。",
+    )
+
+
 def check_mutable_defaults(node: ast.AST) -> list[ReviewIssue]:
     """检查当前函数的直接可变默认字面量，每个匹配项各返回一条问题。"""
     issues: list[ReviewIssue] = []
@@ -63,7 +82,7 @@ def check_mutable_defaults(node: ast.AST) -> list[ReviewIssue]:
 
 def collect_issues(tree: ast.AST) -> list[ReviewIssue]:
     """只遍历一次 AST，对每个节点依次调用规则，收集匹配的问题。"""
-    checks = (check_eval, check_print, check_bare_except)
+    checks = (check_eval, check_print, check_bare_except, check_broad_except_pass)
     issues: list[ReviewIssue] = []
 
     # 遍历顺序沿用 ast.walk；每条规则只检查当前节点，不再遍历整棵树。

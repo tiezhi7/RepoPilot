@@ -381,4 +381,66 @@ def test_openapi_review_issue_exposes_new_and_existing_rule_ids(client: TestClie
         "PY_BARE_EXCEPT",
         "PY_SYNTAX",
         "PY_MUTABLE_DEFAULT",
+        "PY_BROAD_EXCEPT_PASS",
     }
+
+
+@pytest.mark.parametrize(
+    ("code", "expected_line"),
+    [
+        ("try:\n    work()\nexcept Exception:\n    pass\n", 3),
+        ("try:\n    work()\nexcept BaseException:\n    pass\n", 3),
+        ("try:\n    work()\nexcept* Exception:\n    pass\n", 3),
+        ("try:\n    work()\nexcept* BaseException:\n    pass\n", 3),
+        ("try:\n    work()\nexcept (\n    Exception\n):\n    pass\n", 3),
+        ("async def f():\n    try:\n        work()\n    except Exception:\n        pass\n", 4),
+    ],
+)
+def test_broad_except_pass_has_exact_api_response(
+    client: TestClient, code: str, expected_line: int
+) -> None:
+    response = client.post("/api/v1/reviews", json={"code": code})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "language": "python",
+        "issue_count": 1,
+        "issues": [
+            {
+                "rule_id": "PY_BROAD_EXCEPT_PASS",
+                "severity": "warning",
+                "line": expected_line,
+                "message": "广泛捕获异常后直接忽略，可能掩盖错误；请确认是否需要处理或重新抛出异常。",
+            }
+        ],
+    }
+
+
+def test_broad_except_source_is_not_executed_by_api(client: TestClient, tmp_path) -> None:
+    target = tmp_path / "api-broad-except-must-not-run.txt"
+    code = (
+        "from pathlib import Path\n"
+        "try:\n"
+        f"    Path({str(target)!r}).write_text('unexpected', encoding='utf-8')\n"
+        "except Exception:\n"
+        "    pass\n"
+        "raise RuntimeError('submitted code must not run')\n"
+    )
+    assert not target.exists()
+
+    response = client.post("/api/v1/reviews", json={"code": code})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "language": "python",
+        "issue_count": 1,
+        "issues": [
+            {
+                "rule_id": "PY_BROAD_EXCEPT_PASS",
+                "severity": "warning",
+                "line": 4,
+                "message": "广泛捕获异常后直接忽略，可能掩盖错误；请确认是否需要处理或重新抛出异常。",
+            }
+        ],
+    }
+    assert not target.exists()

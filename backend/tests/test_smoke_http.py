@@ -43,7 +43,9 @@ MUTABLE_DEFAULT_CODE = (
     "def add_item(\n    item, items=[],\n):\n    items.append(item)\n    return items\n"
 )
 MUTABLE_DEFAULT_REQUEST = {"code": MUTABLE_DEFAULT_CODE}
-SUCCESS_MESSAGE = "PASS 全部十四项真实 HTTP 检查"
+BROAD_EXCEPT_PASS_CODE = "try:\n    process_data()\nexcept (\n    Exception\n):\n    pass\n"
+BROAD_EXCEPT_PASS_REQUEST = {"code": BROAD_EXCEPT_PASS_CODE}
+SUCCESS_MESSAGE = "PASS 全部十五项真实 HTTP 检查"
 
 
 def mutable_default_response() -> dict[str, object]:
@@ -56,6 +58,21 @@ def mutable_default_response() -> dict[str, object]:
                 "severity": "warning",
                 "line": 2,
                 "message": "可变默认参数可能在多次调用间共享状态；建议使用 None，并在函数内创建新对象。",
+            }
+        ],
+    }
+
+
+def broad_except_pass_response() -> dict[str, object]:
+    return {
+        "language": "python",
+        "issue_count": 1,
+        "issues": [
+            {
+                "rule_id": "PY_BROAD_EXCEPT_PASS",
+                "severity": "warning",
+                "line": 3,
+                "message": "广泛捕获异常后直接忽略，可能掩盖错误；请确认是否需要处理或重新抛出异常。",
             }
         ],
     }
@@ -77,6 +94,8 @@ class Scenario:
     batch_review_detail: object = field(default_factory=lambda: VALID_BATCH_PATHS_DETAIL)
     mutable_default_status: int = 200
     mutable_default_body: object = field(default_factory=mutable_default_response)
+    broad_except_pass_status: int = 200
+    broad_except_pass_body: object = field(default_factory=broad_except_pass_response)
     extra_route: bool = False
     requests: list[tuple[str, str, object]] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
@@ -117,6 +136,8 @@ def response_for(scenario: Scenario, method: str, path: str, payload: object) ->
     if method == "POST" and path == "/api/v1/reviews":
         if payload == MUTABLE_DEFAULT_REQUEST:
             return scenario.mutable_default_status, scenario.mutable_default_body
+        if payload == BROAD_EXCEPT_PASS_REQUEST:
+            return scenario.broad_except_pass_status, scenario.broad_except_pass_body
         if payload == {"code": ""}:
             return 422, {"detail": [{"loc": ["body", "code"], "type": "string_too_short"}]}
         if payload in (
@@ -233,7 +254,7 @@ def run_smoke(
 
 
 @pytest.mark.parametrize("extra_route", [False, True], ids=["eight-routes", "allows-future-route"])
-def test_fourteen_checks_send_expected_requests(tmp_path: Path, extra_route: bool) -> None:
+def test_fifteen_checks_send_expected_requests(tmp_path: Path, extra_route: bool) -> None:
     scenario = Scenario(extra_route=extra_route)
     with local_server(scenario) as port:
         result = run_smoke(port, tmp_path)
@@ -249,6 +270,7 @@ def test_fourteen_checks_send_expected_requests(tmp_path: Path, extra_route: boo
         "正常源码",
         "print 调用",
         "可变默认参数",
+        "广泛捕获后仅 pass",
         "非法语法",
         "空 code 验证",
         "源码不执行",
@@ -266,6 +288,7 @@ def test_fourteen_checks_send_expected_requests(tmp_path: Path, extra_route: boo
         ("POST", "/api/v1/reviews", {"code": "x = 1\n"}),
         ("POST", "/api/v1/reviews", {"code": "print('day9')\n"}),
         ("POST", "/api/v1/reviews", MUTABLE_DEFAULT_REQUEST),
+        ("POST", "/api/v1/reviews", BROAD_EXCEPT_PASS_REQUEST),
         ("POST", "/api/v1/reviews", {"code": "def broken(:\n"}),
         ("POST", "/api/v1/reviews", {"code": ""}),
         ("POST", "/api/v1/reviews", {"code": 'raise RuntimeError("DAY9_MUST_NOT_EXECUTE")\n'}),
@@ -547,7 +570,7 @@ def test_optimized_python_still_checks_batch_path_list(
     assert scenario.requests.count(("GET", "/health", None)) == 1
 
 
-def test_optimized_python_completes_all_fourteen_checks(tmp_path: Path) -> None:
+def test_optimized_python_completes_all_fifteen_checks(tmp_path: Path) -> None:
     scenario = Scenario()
     with local_server(scenario) as port:
         result = run_smoke(port, tmp_path, optimized=True)
@@ -556,12 +579,13 @@ def test_optimized_python_completes_all_fourteen_checks(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stderr == ""
     assert SUCCESS_MESSAGE in result.stdout
-    assert len(scenario.requests) == 14
+    assert len(scenario.requests) == 15
     assert scenario.requests[-2:] == [
         ("POST", BATCH_REVIEW_PATH, BATCH_REVIEW_REQUEST),
         ("GET", "/health", None),
     ]
     assert ("POST", "/api/v1/reviews", MUTABLE_DEFAULT_REQUEST) in scenario.requests
+    assert ("POST", "/api/v1/reviews", BROAD_EXCEPT_PASS_REQUEST) in scenario.requests
 
 
 @pytest.mark.parametrize("status", [422, 500])
@@ -634,4 +658,78 @@ def test_optimized_python_still_checks_mutable_defaults(
     assert message in result.stderr
     assert SUCCESS_MESSAGE not in result.stdout
     assert scenario.requests[-1] == ("POST", "/api/v1/reviews", MUTABLE_DEFAULT_REQUEST)
+    assert scenario.requests.count(("GET", "/health", None)) == 1
+
+
+@pytest.mark.parametrize("status", [422, 500])
+def test_broad_except_pass_smoke_rejects_error_status(tmp_path: Path, status: int) -> None:
+    scenario = Scenario(broad_except_pass_status=status)
+    with local_server(scenario) as port:
+        result = run_smoke(port, tmp_path)
+
+    assert result.returncode == 1
+    assert "广泛捕获后仅 pass 状态码应为 200" in result.stderr
+    assert SUCCESS_MESSAGE not in result.stdout
+    assert scenario.requests[-1] == ("POST", "/api/v1/reviews", BROAD_EXCEPT_PASS_REQUEST)
+    assert scenario.requests.count(("GET", "/health", None)) == 1
+
+
+@pytest.mark.parametrize(
+    ("response_changes", "issue_changes", "message"),
+    [
+        ({"language": "javascript"}, {}, "language 应为 python"),
+        ({"issue_count": True}, {}, "数量与列表不一致"),
+        ({"issue_count": 0, "issues": []}, {}, "应恰好包含一个问题"),
+        ({"issue_count": 2, "issues": [{}, {}]}, {}, "应恰好包含一个问题"),
+        ({"issues": None}, {}, "issues 应为数组"),
+        ({}, {"rule_id": "PY_BARE_EXCEPT"}, "rule_id 不正确"),
+        ({}, {"severity": "info"}, "severity 不正确"),
+        ({}, {"line": 4}, "行号应为 3"),
+        ({}, {"line": 6}, "行号应为 3"),
+        ({}, {"line": True}, "行号必须是正整数"),
+        ({}, {"line": "3"}, "行号必须是正整数"),
+    ],
+)
+def test_broad_except_pass_smoke_rejects_wrong_result(
+    tmp_path: Path,
+    response_changes: dict[str, object],
+    issue_changes: dict[str, object],
+    message: str,
+) -> None:
+    body = broad_except_pass_response()
+    issues = body["issues"]
+    assert isinstance(issues, list) and isinstance(issues[0], dict)
+    issues[0].update(issue_changes)
+    body.update(response_changes)
+    scenario = Scenario(broad_except_pass_body=body)
+    with local_server(scenario) as port:
+        result = run_smoke(port, tmp_path)
+
+    assert result.returncode == 1
+    assert message in result.stderr
+    assert SUCCESS_MESSAGE not in result.stdout
+    assert scenario.requests[-1] == ("POST", "/api/v1/reviews", BROAD_EXCEPT_PASS_REQUEST)
+    assert scenario.requests.count(("GET", "/health", None)) == 1
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [("rule_id", "PY_BARE_EXCEPT", "rule_id 不正确"), ("line", 4, "行号应为 3")],
+)
+def test_optimized_python_still_checks_broad_except_pass(
+    tmp_path: Path, field: str, value: object, message: str
+) -> None:
+    body = broad_except_pass_response()
+    issues = body["issues"]
+    assert isinstance(issues, list) and isinstance(issues[0], dict)
+    issues[0][field] = value
+    scenario = Scenario(broad_except_pass_body=body)
+    with local_server(scenario) as port:
+        result = run_smoke(port, tmp_path, optimized=True)
+
+    assert "-O" in result.args
+    assert result.returncode == 1
+    assert message in result.stderr
+    assert SUCCESS_MESSAGE not in result.stdout
+    assert scenario.requests[-1] == ("POST", "/api/v1/reviews", BROAD_EXCEPT_PASS_REQUEST)
     assert scenario.requests.count(("GET", "/health", None)) == 1

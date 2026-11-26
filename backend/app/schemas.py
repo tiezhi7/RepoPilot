@@ -19,7 +19,14 @@ class ReviewRequest(BaseModel):
 class ReviewIssue(BaseModel):
     """一条审查发现，行号从 1 开始。"""
 
-    rule_id: Literal["PY_EVAL", "PY_PRINT", "PY_BARE_EXCEPT", "PY_SYNTAX", "PY_MUTABLE_DEFAULT"]
+    rule_id: Literal[
+        "PY_EVAL",
+        "PY_PRINT",
+        "PY_BARE_EXCEPT",
+        "PY_SYNTAX",
+        "PY_MUTABLE_DEFAULT",
+        "PY_BROAD_EXCEPT_PASS",
+    ]
     severity: Literal["error", "warning", "info"]
     line: int = Field(ge=1)
     message: str
