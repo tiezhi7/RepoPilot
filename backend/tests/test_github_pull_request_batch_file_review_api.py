@@ -766,3 +766,85 @@ def test_broad_except_pass_is_reviewed_per_file_after_all_downloads(
     assert all(dict(request.url.params) == {"ref": HEAD_SHA} for request in upstream.requests[1:])
     assert_resources_closed(upstream, clients=1, responses=4)
     assert app.dependency_overrides == {}
+
+
+def test_literal_identity_is_reviewed_per_file_after_all_downloads(
+    api_client: TestClient,
+    upstream: MockUpstream,
+    review_inputs: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sources = [
+        'result = (\n    value\n    is "ready"\n)\n',
+        "print('before')\na is 1 is b\n",
+        "a is b == 1\n",
+    ]
+    upstream.sources = dict(zip(FILE_PATHS, sources, strict=True))
+    tracked_review = main_module.review_python
+    downloads_before_review: list[int] = []
+
+    def review(code: str) -> list[ReviewIssue]:
+        downloads_before_review.append(len(upstream.responses))
+        assert len(upstream.responses) == 4
+        assert all(response.is_closed for response in upstream.responses)
+        return tracked_review(code)
+
+    monkeypatch.setattr(main_module, "review_python", review)
+
+    response = api_client.post(API_PATH, json=request_body())
+
+    message = "使用 is / is not 比较字面量可能产生非预期结果；请确认是否应使用 == / !=。"
+    reviews = [
+        {
+            "language": "python",
+            "issue_count": 1,
+            "issues": [
+                {
+                    "rule_id": "PY_LITERAL_IDENTITY",
+                    "severity": "warning",
+                    "line": 2,
+                    "message": message,
+                }
+            ],
+        },
+        {
+            "language": "python",
+            "issue_count": 2,
+            "issues": [
+                {
+                    "rule_id": "PY_PRINT",
+                    "severity": "info",
+                    "line": 1,
+                    "message": "发现 print() 调用；请确认是否需要保留调试输出。",
+                },
+                {
+                    "rule_id": "PY_LITERAL_IDENTITY",
+                    "severity": "warning",
+                    "line": 2,
+                    "message": message,
+                },
+            ],
+        },
+        {"language": "python", "issue_count": 0, "issues": []},
+    ]
+    assert response.status_code == 200
+    assert response.json() == {
+        "repository_url": REPOSITORY_URL,
+        "pull_number": 42,
+        "head_repository_url": f"https://github.com/{upstream.source_name}",
+        "head_sha": HEAD_SHA,
+        "files": [
+            {"file_path": path, "review": review}
+            for path, review in zip(FILE_PATHS, reviews, strict=True)
+        ],
+    }
+    assert review_inputs == sources
+    assert downloads_before_review == [4, 4, 4]
+    assert upstream.fetch_calls == [(REPOSITORY_URL, 42, FILE_PATHS)]
+    assert len(upstream.requests) == 4
+    assert [request.url.path for request in upstream.requests[1:]] == [
+        f"/repos/{upstream.source_name}/contents/{path}" for path in FILE_PATHS
+    ]
+    assert all(dict(request.url.params) == {"ref": HEAD_SHA} for request in upstream.requests[1:])
+    assert_resources_closed(upstream, clients=1, responses=4)
+    assert app.dependency_overrides == {}

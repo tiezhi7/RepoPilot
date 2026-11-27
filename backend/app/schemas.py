@@ -26,6 +26,7 @@ class ReviewIssue(BaseModel):
         "PY_SYNTAX",
         "PY_MUTABLE_DEFAULT",
         "PY_BROAD_EXCEPT_PASS",
+        "PY_LITERAL_IDENTITY",
     ]
     severity: Literal["error", "warning", "info"]
     line: int = Field(ge=1)

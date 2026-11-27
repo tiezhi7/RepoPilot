@@ -198,6 +198,14 @@ def run(port: int) -> None:
         "warning",
         expected_line=3,
     )
+    review(
+        port,
+        "字面量身份比较",
+        'result = (\n    value\n    is "ready"\n)\n',
+        "PY_LITERAL_IDENTITY",
+        "warning",
+        expected_line=2,
+    )
     review(port, "非法语法", "def broken(:\n", "PY_SYNTAX", "error")
 
     print("CHECK 空 code", flush=True)
@@ -319,11 +327,11 @@ def run(port: int) -> None:
     print("PASS PR 批量文件路径验证", flush=True)
 
     health(port, "最后健康检查")
-    print("PASS 全部十五项真实 HTTP 检查", flush=True)
+    print("PASS 全部十六项真实 HTTP 检查", flush=True)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="检查本机容器端口的十五项真实 HTTP 行为")
+    parser = argparse.ArgumentParser(description="检查本机容器端口的十六项真实 HTTP 行为")
     parser.add_argument("--port", required=True, type=port_number, help="宿主机端口，1–65535")
     args = parser.parse_args()
     try:

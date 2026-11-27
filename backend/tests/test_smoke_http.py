@@ -45,7 +45,9 @@ MUTABLE_DEFAULT_CODE = (
 MUTABLE_DEFAULT_REQUEST = {"code": MUTABLE_DEFAULT_CODE}
 BROAD_EXCEPT_PASS_CODE = "try:\n    process_data()\nexcept (\n    Exception\n):\n    pass\n"
 BROAD_EXCEPT_PASS_REQUEST = {"code": BROAD_EXCEPT_PASS_CODE}
-SUCCESS_MESSAGE = "PASS 全部十五项真实 HTTP 检查"
+LITERAL_IDENTITY_CODE = 'result = (\n    value\n    is "ready"\n)\n'
+LITERAL_IDENTITY_REQUEST = {"code": LITERAL_IDENTITY_CODE}
+SUCCESS_MESSAGE = "PASS 全部十六项真实 HTTP 检查"
 
 
 def mutable_default_response() -> dict[str, object]:
@@ -78,6 +80,21 @@ def broad_except_pass_response() -> dict[str, object]:
     }
 
 
+def literal_identity_response() -> dict[str, object]:
+    return {
+        "language": "python",
+        "issue_count": 1,
+        "issues": [
+            {
+                "rule_id": "PY_LITERAL_IDENTITY",
+                "severity": "warning",
+                "line": 2,
+                "message": "使用 is / is not 比较字面量可能产生非预期结果；请确认是否应使用 == / !=。",
+            }
+        ],
+    }
+
+
 @dataclass
 class Scenario:
     pr_method: str | None = "post"
@@ -96,6 +113,8 @@ class Scenario:
     mutable_default_body: object = field(default_factory=mutable_default_response)
     broad_except_pass_status: int = 200
     broad_except_pass_body: object = field(default_factory=broad_except_pass_response)
+    literal_identity_status: int = 200
+    literal_identity_body: object = field(default_factory=literal_identity_response)
     extra_route: bool = False
     requests: list[tuple[str, str, object]] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
@@ -138,6 +157,8 @@ def response_for(scenario: Scenario, method: str, path: str, payload: object) ->
             return scenario.mutable_default_status, scenario.mutable_default_body
         if payload == BROAD_EXCEPT_PASS_REQUEST:
             return scenario.broad_except_pass_status, scenario.broad_except_pass_body
+        if payload == LITERAL_IDENTITY_REQUEST:
+            return scenario.literal_identity_status, scenario.literal_identity_body
         if payload == {"code": ""}:
             return 422, {"detail": [{"loc": ["body", "code"], "type": "string_too_short"}]}
         if payload in (
@@ -254,7 +275,7 @@ def run_smoke(
 
 
 @pytest.mark.parametrize("extra_route", [False, True], ids=["eight-routes", "allows-future-route"])
-def test_fifteen_checks_send_expected_requests(tmp_path: Path, extra_route: bool) -> None:
+def test_sixteen_checks_send_expected_requests(tmp_path: Path, extra_route: bool) -> None:
     scenario = Scenario(extra_route=extra_route)
     with local_server(scenario) as port:
         result = run_smoke(port, tmp_path)
@@ -271,6 +292,7 @@ def test_fifteen_checks_send_expected_requests(tmp_path: Path, extra_route: bool
         "print 调用",
         "可变默认参数",
         "广泛捕获后仅 pass",
+        "字面量身份比较",
         "非法语法",
         "空 code 验证",
         "源码不执行",
@@ -289,6 +311,7 @@ def test_fifteen_checks_send_expected_requests(tmp_path: Path, extra_route: bool
         ("POST", "/api/v1/reviews", {"code": "print('day9')\n"}),
         ("POST", "/api/v1/reviews", MUTABLE_DEFAULT_REQUEST),
         ("POST", "/api/v1/reviews", BROAD_EXCEPT_PASS_REQUEST),
+        ("POST", "/api/v1/reviews", LITERAL_IDENTITY_REQUEST),
         ("POST", "/api/v1/reviews", {"code": "def broken(:\n"}),
         ("POST", "/api/v1/reviews", {"code": ""}),
         ("POST", "/api/v1/reviews", {"code": 'raise RuntimeError("DAY9_MUST_NOT_EXECUTE")\n'}),
@@ -570,7 +593,7 @@ def test_optimized_python_still_checks_batch_path_list(
     assert scenario.requests.count(("GET", "/health", None)) == 1
 
 
-def test_optimized_python_completes_all_fifteen_checks(tmp_path: Path) -> None:
+def test_optimized_python_completes_all_sixteen_checks(tmp_path: Path) -> None:
     scenario = Scenario()
     with local_server(scenario) as port:
         result = run_smoke(port, tmp_path, optimized=True)
@@ -579,13 +602,14 @@ def test_optimized_python_completes_all_fifteen_checks(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stderr == ""
     assert SUCCESS_MESSAGE in result.stdout
-    assert len(scenario.requests) == 15
+    assert len(scenario.requests) == 16
     assert scenario.requests[-2:] == [
         ("POST", BATCH_REVIEW_PATH, BATCH_REVIEW_REQUEST),
         ("GET", "/health", None),
     ]
     assert ("POST", "/api/v1/reviews", MUTABLE_DEFAULT_REQUEST) in scenario.requests
     assert ("POST", "/api/v1/reviews", BROAD_EXCEPT_PASS_REQUEST) in scenario.requests
+    assert ("POST", "/api/v1/reviews", LITERAL_IDENTITY_REQUEST) in scenario.requests
 
 
 @pytest.mark.parametrize("status", [422, 500])
@@ -732,4 +756,78 @@ def test_optimized_python_still_checks_broad_except_pass(
     assert message in result.stderr
     assert SUCCESS_MESSAGE not in result.stdout
     assert scenario.requests[-1] == ("POST", "/api/v1/reviews", BROAD_EXCEPT_PASS_REQUEST)
+    assert scenario.requests.count(("GET", "/health", None)) == 1
+
+
+@pytest.mark.parametrize("status", [422, 500])
+def test_literal_identity_smoke_rejects_error_status(tmp_path: Path, status: int) -> None:
+    scenario = Scenario(literal_identity_status=status)
+    with local_server(scenario) as port:
+        result = run_smoke(port, tmp_path)
+
+    assert result.returncode == 1
+    assert "字面量身份比较 状态码应为 200" in result.stderr
+    assert SUCCESS_MESSAGE not in result.stdout
+    assert scenario.requests[-1] == ("POST", "/api/v1/reviews", LITERAL_IDENTITY_REQUEST)
+    assert scenario.requests.count(("GET", "/health", None)) == 1
+
+
+@pytest.mark.parametrize(
+    ("response_changes", "issue_changes", "message"),
+    [
+        ({"language": "javascript"}, {}, "language 应为 python"),
+        ({"issue_count": True}, {}, "数量与列表不一致"),
+        ({"issue_count": 0, "issues": []}, {}, "应恰好包含一个问题"),
+        ({"issue_count": 2, "issues": [{}, {}]}, {}, "应恰好包含一个问题"),
+        ({"issues": None}, {}, "issues 应为数组"),
+        ({}, {"rule_id": "PY_BROAD_EXCEPT_PASS"}, "rule_id 不正确"),
+        ({}, {"severity": "info"}, "severity 不正确"),
+        ({}, {"line": 1}, "行号应为 2"),
+        ({}, {"line": 3}, "行号应为 2"),
+        ({}, {"line": True}, "行号必须是正整数"),
+        ({}, {"line": "2"}, "行号必须是正整数"),
+    ],
+)
+def test_literal_identity_smoke_rejects_wrong_result(
+    tmp_path: Path,
+    response_changes: dict[str, object],
+    issue_changes: dict[str, object],
+    message: str,
+) -> None:
+    body = literal_identity_response()
+    issues = body["issues"]
+    assert isinstance(issues, list) and isinstance(issues[0], dict)
+    issues[0].update(issue_changes)
+    body.update(response_changes)
+    scenario = Scenario(literal_identity_body=body)
+    with local_server(scenario) as port:
+        result = run_smoke(port, tmp_path)
+
+    assert result.returncode == 1
+    assert message in result.stderr
+    assert SUCCESS_MESSAGE not in result.stdout
+    assert scenario.requests[-1] == ("POST", "/api/v1/reviews", LITERAL_IDENTITY_REQUEST)
+    assert scenario.requests.count(("GET", "/health", None)) == 1
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [("rule_id", "PY_BROAD_EXCEPT_PASS", "rule_id 不正确"), ("line", 3, "行号应为 2")],
+)
+def test_optimized_python_still_checks_literal_identity(
+    tmp_path: Path, field: str, value: object, message: str
+) -> None:
+    body = literal_identity_response()
+    issues = body["issues"]
+    assert isinstance(issues, list) and isinstance(issues[0], dict)
+    issues[0][field] = value
+    scenario = Scenario(literal_identity_body=body)
+    with local_server(scenario) as port:
+        result = run_smoke(port, tmp_path, optimized=True)
+
+    assert "-O" in result.args
+    assert result.returncode == 1
+    assert message in result.stderr
+    assert SUCCESS_MESSAGE not in result.stdout
+    assert scenario.requests[-1] == ("POST", "/api/v1/reviews", LITERAL_IDENTITY_REQUEST)
     assert scenario.requests.count(("GET", "/health", None)) == 1

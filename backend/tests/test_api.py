@@ -382,6 +382,7 @@ def test_openapi_review_issue_exposes_new_and_existing_rule_ids(client: TestClie
         "PY_SYNTAX",
         "PY_MUTABLE_DEFAULT",
         "PY_BROAD_EXCEPT_PASS",
+        "PY_LITERAL_IDENTITY",
     }
 
 
@@ -440,6 +441,71 @@ def test_broad_except_source_is_not_executed_by_api(client: TestClient, tmp_path
                 "severity": "warning",
                 "line": 4,
                 "message": "广泛捕获异常后直接忽略，可能掩盖错误；请确认是否需要处理或重新抛出异常。",
+            }
+        ],
+    }
+    assert not target.exists()
+
+
+@pytest.mark.parametrize(
+    ("code", "lines"),
+    [
+        ('value is "ready"', [1]),
+        ("value is not -1", [1]),
+        ('b"ready" is value', [1]),
+        ('result = (\n    value\n    is "ready"\n)\n', [2]),
+        ("a is b == 1", []),
+        ("a == 1 is b", [1]),
+        ("a is 1 is b", [1]),
+        ("(a is 1) is (b is 2)", [1, 1]),
+        ("value is None", []),
+        ("value is True", []),
+        ("True is 1", [1]),
+    ],
+)
+def test_literal_identity_has_exact_api_response(
+    client: TestClient, code: str, lines: list[int]
+) -> None:
+    response = client.post("/api/v1/reviews", json={"code": code})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "language": "python",
+        "issue_count": len(lines),
+        "issues": [
+            {
+                "rule_id": "PY_LITERAL_IDENTITY",
+                "severity": "warning",
+                "line": line,
+                "message": "使用 is / is not 比较字面量可能产生非预期结果；请确认是否应使用 == / !=。",
+            }
+            for line in lines
+        ],
+    }
+
+
+def test_literal_identity_source_is_not_executed_by_api(client: TestClient, tmp_path) -> None:
+    target = tmp_path / "api-literal-identity-must-not-run.txt"
+    code = (
+        "from pathlib import Path\n"
+        f"Path({str(target)!r}).write_text('unexpected', encoding='utf-8')\n"
+        "result = value is 1\n"
+        "raise RuntimeError('submitted code must not run')\n"
+    )
+    assert not target.exists()
+
+    response = client.post("/api/v1/reviews", json={"code": code})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "language": "python",
+        "issue_count": 1,
+        "issues": [
+            {
+                "rule_id": "PY_LITERAL_IDENTITY",
+                "severity": "warning",
+                "line": 3,
+                "message": "使用 is / is not 比较字面量可能产生非预期结果；请确认是否应使用 == / !=。",
             }
         ],
     }
